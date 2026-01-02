@@ -1,0 +1,18 @@
+services:
+  youtube-transcription:
+    build: .
+    container_name: youtube-transcription-service
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - ./youtube_transcriptions.db:/app/youtube_transcriptions.db
+      - ./static:/app/static
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
