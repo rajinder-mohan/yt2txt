@@ -17,7 +17,8 @@ from database import (
     create_video_record,
     update_video_record,
     delete_audio_file_path,
-    get_db_connection
+    get_all_videos,
+    get_stats
 )
 from auth import authenticate_user, create_session, delete_session, get_current_user
 
@@ -467,34 +468,15 @@ async def logout(request: LogoutRequest):
 
 # Admin dashboard endpoints
 @app.get("/api/admin/videos")
-async def get_all_videos(user: str = Depends(get_current_user)):
+async def get_all_videos_endpoint(user: str = Depends(get_current_user)):
     """Get all videos with their status."""
-    with get_db_connection() as conn:
-        cursor = conn.execute("""
-            SELECT id, video_id, video_url, status, transcript, error_message, 
-                   created_at, updated_at
-            FROM video_transcriptions
-            ORDER BY updated_at DESC
-        """)
-        rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+    return get_all_videos()
 
 
 @app.get("/api/admin/stats")
-async def get_stats(user: str = Depends(get_current_user)):
+async def get_stats_endpoint(user: str = Depends(get_current_user)):
     """Get statistics about videos."""
-    with get_db_connection() as conn:
-        total = conn.execute("SELECT COUNT(*) as count FROM video_transcriptions").fetchone()['count']
-        success = conn.execute("SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'success'").fetchone()['count']
-        failed = conn.execute("SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'failed'").fetchone()['count']
-        processing = conn.execute("SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'processing'").fetchone()['count']
-        
-        return {
-            "total": total,
-            "success": success,
-            "failed": failed,
-            "processing": processing
-        }
+    return get_stats()
 
 
 # Admin dashboard GUI

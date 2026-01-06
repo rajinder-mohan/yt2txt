@@ -317,12 +317,26 @@ ADMIN_PASSWORD=admin
 - `ADMIN_USERNAME`: Default admin username (default: `admin`)
 - `ADMIN_PASSWORD`: Default admin password (default: `admin`)
 
+**Database Configuration:**
+- `DB_TYPE`: Database type - `sqlite` (default) or `postgres`
+
+**For SQLite (default):**
+- `SQLITE_PATH`: Path to SQLite database file (default: `youtube_transcriptions.db`)
+
+**For PostgreSQL:**
+- `POSTGRES_HOST`: PostgreSQL host (default: `localhost`)
+- `POSTGRES_PORT`: PostgreSQL port (default: `5432`)
+- `POSTGRES_DB`: Database name (default: `youtube_transcriptions`)
+- `POSTGRES_USER`: PostgreSQL username (default: `postgres`)
+- `POSTGRES_PASSWORD`: PostgreSQL password (default: `postgres`)
+
 **Note:** 
 - The `.env` file is automatically loaded when the application starts
 - For Docker, the `.env` file is automatically loaded via `docker-compose.yml`
 - You can still provide the API key in the request body as an alternative
 - **Important**: Change the default admin password in production!
 - The default admin user is created automatically on first run using these credentials
+- The database type is determined by `DB_TYPE` environment variable
 
 ## Notes
 
