@@ -35,16 +35,28 @@ def get_db_connection_postgres():
     try:
         import psycopg2
         from psycopg2.extras import RealDictCursor
+        
         conn = psycopg2.connect(
             host=POSTGRES_HOST,
             port=POSTGRES_PORT,
             database=POSTGRES_DB,
             user=POSTGRES_USER,
-            password=POSTGRES_PASSWORD
+            password=POSTGRES_PASSWORD,
+            connect_timeout=10
         )
         return conn
     except ImportError:
         raise ImportError("psycopg2-binary is required for PostgreSQL support. Install it with: pip install psycopg2-binary")
+    except Exception as e:
+        error_msg = str(e)
+        if "Connection refused" in error_msg or "connection to server" in error_msg.lower():
+            raise ConnectionError(
+                f"Cannot connect to PostgreSQL at {POSTGRES_HOST}:{POSTGRES_PORT}. "
+                f"If running in Docker, use 'network_mode: host' in docker-compose.yml (already configured) "
+                f"or set POSTGRES_HOST to your host's IP address. "
+                f"Original error: {error_msg}"
+            )
+        raise
 
 
 @contextmanager
@@ -113,7 +125,8 @@ def init_database():
     with get_db_connection() as conn:
         # Video transcriptions table
         if DB_TYPE == "postgres":
-            conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS video_transcriptions (
                     id SERIAL PRIMARY KEY,
                     video_id VARCHAR(255) NOT NULL UNIQUE,
@@ -126,15 +139,15 @@ def init_database():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
-            conn.execute("""
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_id ON video_transcriptions(video_id)
             """)
-            conn.execute("""
+            cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_status ON video_transcriptions(status)
             """)
             
             # Admin users table
-            conn.execute("""
+            cursor.execute("""
                 CREATE TABLE IF NOT EXISTS admin_users (
                     id SERIAL PRIMARY KEY,
                     username VARCHAR(255) NOT NULL UNIQUE,
@@ -142,6 +155,7 @@ def init_database():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            cursor.close()
         else:  # SQLite
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS video_transcriptions (
@@ -179,11 +193,13 @@ def init_database():
         default_password_hash = hashlib.sha256(default_password.encode()).hexdigest()
         
         if DB_TYPE == "postgres":
-            conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT INTO admin_users (username, password_hash)
                 VALUES (%s, %s)
                 ON CONFLICT (username) DO NOTHING
             """, (default_username, default_password_hash))
+            cursor.close()
         else:  # SQLite
             conn.execute("""
                 INSERT OR IGNORE INTO admin_users (username, password_hash)
@@ -204,12 +220,14 @@ def create_video_record(video_id: str, video_url: str = None, status: str = "pro
     """Create a new video record in the database."""
     with get_db_connection() as conn:
         if DB_TYPE == "postgres":
-            conn.execute("""
+            cursor = conn.cursor()
+            cursor.execute("""
                 INSERT INTO video_transcriptions 
                 (video_id, video_url, status, created_at, updated_at)
                 VALUES (%s, %s, %s, %s, %s)
                 ON CONFLICT (video_id) DO NOTHING
             """, (video_id, video_url, status, datetime.now(), datetime.now()))
+            cursor.close()
         else:  # SQLite
             conn.execute("""
                 INSERT OR IGNORE INTO video_transcriptions 
@@ -265,10 +283,12 @@ def delete_audio_file_path(video_id: str):
     """Remove audio_file_path from database after successful deletion."""
     with get_db_connection() as conn:
         if DB_TYPE == "postgres":
-            conn.execute(
+            cursor = conn.cursor()
+            cursor.execute(
                 "UPDATE video_transcriptions SET audio_file_path = NULL, updated_at = %s WHERE video_id = %s",
                 (datetime.now(), video_id)
             )
+            cursor.close()
         else:  # SQLite
             conn.execute(
                 "UPDATE video_transcriptions SET audio_file_path = NULL, updated_at = ? WHERE video_id = ?",

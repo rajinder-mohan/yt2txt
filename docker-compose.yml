@@ -1,11 +1,35 @@
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: youtube-transcription-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-yt2text}
+      POSTGRES_USER: ${POSTGRES_USER:-kiraayepe_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-S!3k9vQpXr7#uZ2m}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kiraayepe_user}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   youtube-transcription:
     build: .
     container_name: youtube-transcription-service
-    ports:
-      - "8001:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
     env_file:
       - .env
+    environment:
+      # Override POSTGRES_HOST to use the service name
+      POSTGRES_HOST: postgres
+    ports:
+      - "8001:8001"
     volumes:
       - ./youtube_transcriptions.db:/app/youtube_transcriptions.db
       - ./static:/app/static
@@ -16,3 +40,5 @@ services:
       timeout: 10s
       retries: 3
 
+volumes:
+  postgres_data:
