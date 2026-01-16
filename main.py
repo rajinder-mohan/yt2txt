@@ -8,6 +8,8 @@ import os
 import tempfile
 import shutil
 import re
+import time
+import asyncio
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from deepgram import DeepgramClient
@@ -93,15 +95,26 @@ def cookie_string_to_netscape(cookie_string: str, domain: str = ".youtube.com") 
 
 def get_ytdlp_options(base_opts: dict = None) -> dict:
     """
-    Get yt-dlp options with cookie support if configured.
+    Get yt-dlp options with cookie support and rate limiting if configured.
     
     Priority:
     1. Stored cookies from database (youtube_cookies setting)
     2. YOUTUBE_COOKIES_FILE: Path to cookies file (Netscape format)
     3. YOUTUBE_COOKIES_BROWSER: Browser to extract cookies from
+    
+    Rate limiting:
+    - Adds sleep delay between requests to avoid YouTube rate limiting
+    - Default: 2 seconds between requests
+    - Configurable via YOUTUBE_SLEEP_INTERVAL environment variable
     """
     if base_opts is None:
         base_opts = {}
+    
+    # Add rate limiting (sleep between requests)
+    # Default: 2 seconds, configurable via environment variable
+    sleep_interval = float(os.getenv("YOUTUBE_SLEEP_INTERVAL", "2.0"))
+    base_opts["sleep_interval"] = sleep_interval
+    base_opts["sleep_interval_requests"] = 1  # Sleep after every request
     
     # First, check for stored cookies in database
     stored_cookies = get_setting("youtube_cookies")
@@ -110,9 +123,12 @@ def get_ytdlp_options(base_opts: dict = None) -> dict:
             # Convert cookie string to Netscape format file
             cookies_file = cookie_string_to_netscape(stored_cookies)
             base_opts["cookies"] = cookies_file
+            print(f"Using stored cookies from database (converted to: {cookies_file})")
             return base_opts
         except Exception as e:
             print(f"Warning: Failed to use stored cookies: {e}")
+            import traceback
+            traceback.print_exc()
     
     # Fallback to environment variables
     cookies_file = os.getenv("YOUTUBE_COOKIES_FILE")
@@ -292,9 +308,12 @@ def download_audio(video_id: str, output_dir: str) -> str:
         "noplaylist": True,
         "quiet": True,
         "no_warnings": True,
+        # Add retry options for rate limiting
+        "retries": 3,
+        "fragment_retries": 3,
     }
     
-    # Add cookie support if configured
+    # Add cookie support and rate limiting if configured
     ydl_opts = get_ytdlp_options(base_opts)
 
     try:
@@ -387,7 +406,14 @@ async def transcribe_videos(request: VideoRequest):
     success_results = []
     error_results = []
     
-    for video_id, original_input in video_list:
+    # Get sleep interval for rate limiting
+    sleep_interval = float(os.getenv("YOUTUBE_SLEEP_INTERVAL", "2.0"))
+    
+    for idx, (video_id, original_input) in enumerate(video_list):
+        # Add delay between requests to avoid rate limiting (except for first video)
+        if idx > 0:
+            print(f"Rate limiting: Waiting {sleep_interval} seconds before processing next video...")
+            await asyncio.sleep(sleep_interval)
         audio_file_path = None
         transcript = None
         from_cache = False
@@ -397,8 +423,9 @@ async def transcribe_videos(request: VideoRequest):
             db_record = get_video_record(video_id)
             
             if db_record:
-                # If we have a processed transcript, return it
+                # Skip duplicate videos that are already processed
                 if db_record['status'] in ['success', 'processed'] and db_record['transcript']:
+                    print(f"Skipping duplicate video {video_id}: Already processed")
                     success_results.append(TranscriptResponse(
                         video_id=video_id,
                         video_url=db_record.get('video_url') or original_input,
@@ -408,8 +435,9 @@ async def transcribe_videos(request: VideoRequest):
                     ))
                     continue
                 
-                # If status is failed, skip downloading (don't re-download)
+                # Skip failed videos (don't re-download)
                 if db_record['status'] == 'failed':
+                    print(f"Skipping failed video {video_id}: Previous attempt failed")
                     error_results.append(ErrorResponse(
                         video_id=video_id,
                         video_url=db_record.get('video_url') or original_input,
@@ -417,6 +445,11 @@ async def transcribe_videos(request: VideoRequest):
                         status="error"
                     ))
                     continue
+                
+                # Skip pending videos that are already in queue
+                if db_record['status'] == 'pending':
+                    print(f"Skipping pending video {video_id}: Already in queue")
+                    # Still process it, but note it was pending
                 
                 # If status is pending or processing, continue with processing
                 # If we have an audio file path from previous attempt, use it
@@ -1061,9 +1094,17 @@ async def process_channel_videos(
         
         success_count = 0
         failed_count = 0
+        skipped_count = 0
         video_results = []
         
-        for video_id, video_url in video_list:
+        # Get sleep interval for rate limiting
+        sleep_interval = float(os.getenv("YOUTUBE_SLEEP_INTERVAL", "2.0"))
+        
+        for idx, (video_id, video_url) in enumerate(video_list):
+            # Add delay between requests to avoid rate limiting (except for first video)
+            if idx > 0:
+                print(f"Rate limiting: Waiting {sleep_interval} seconds before processing next video...")
+                await asyncio.sleep(sleep_interval)
             audio_file_path = None
             transcript = None
             error_msg = None
@@ -1074,14 +1115,23 @@ async def process_channel_videos(
                 db_record = get_video_record(video_id)
                 
                 if db_record and db_record['status'] in ['success', 'processed'] and db_record['transcript']:
-                    # Use cached transcript
+                    # Skip already processed videos (duplicate detection)
                     transcript = db_record['transcript']
                     status = "processed"
                     success_count += 1
+                    skipped_count += 1
+                    print(f"Skipping video {video_id}: Already processed")
                 elif db_record and db_record['status'] == 'failed':
-                    # Skip failed videos
+                    # Skip failed videos (don't retry automatically)
                     error_msg = db_record.get('error_message', 'Previous attempt failed')
                     failed_count += 1
+                    skipped_count += 1
+                    print(f"Skipping video {video_id}: Previous attempt failed")
+                elif db_record and db_record['status'] == 'pending':
+                    # Skip pending videos that haven't been processed yet (will be processed separately)
+                    status = "pending"
+                    skipped_count += 1
+                    print(f"Skipping video {video_id}: Already in queue (pending)")
                 else:
                     # Process video
                     if not db_record:
@@ -1141,7 +1191,8 @@ async def process_channel_videos(
         except Exception as e:
             print(f"Warning: Could not clean up temp directory: {e}")
         
-        message = f"Processed {len(videos_info)} videos. {success_count} successful, {failed_count} failed."
+        total_processed = success_count + failed_count
+        message = f"Processed {len(videos_info)} videos. {success_count} successful ({skipped_count} skipped/duplicates), {failed_count} failed."
         
         return ChannelProcessResponse(
             channel_url=channel_url,
