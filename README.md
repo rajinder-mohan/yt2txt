@@ -360,8 +360,10 @@ If you're getting "Sign in to confirm you're not a bot" errors from YouTube, con
 - `SMTP_USE_TLS`: Use TLS encryption (default: `true`)
 
 **API Key Configuration (Optional - for API authentication):**
-- `API_KEY`: API key for programmatic access (optional, but recommended for n8n integration)
-  - If set, you can use `X-API-Key` header instead of Bearer token
+**Authentication:**
+- All API endpoints require Basic Auth (username:password) or Bearer token
+- Basic Auth is recommended for external API access and third-party integrations
+- Bearer token is used for dashboard sessions
   - If not set, only Bearer token authentication is available
 
 **Note:** 

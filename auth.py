@@ -13,9 +13,6 @@ load_dotenv()
 security = HTTPBearer(auto_error=False)
 basic_security = HTTPBasic(auto_error=False)
 
-# API Key from environment variable
-API_KEY = os.getenv("API_KEY", "")
-
 # Simple session storage (in production, use Redis or database)
 active_sessions = {}
 
@@ -104,11 +101,6 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     return username
 
 
-async def get_api_key_header(x_api_key: Optional[str] = Header(None)) -> Optional[str]:
-    """Get API key from X-API-Key header."""
-    return x_api_key
-
-
 def authenticate_basic_auth_sync(username: str, password: str) -> Optional[str]:
     """Synchronous Basic Auth authentication."""
     if authenticate_user(username, password):
@@ -118,31 +110,19 @@ def authenticate_basic_auth_sync(username: str, password: str) -> Optional[str]:
 
 async def authenticate_api_request(
     request: Request,
-    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     basic_credentials: Optional[HTTPBasicCredentials] = Depends(basic_security)
 ) -> str:
     """
-    Flexible authentication: Accepts API key, Bearer token, or Basic Auth.
+    Authentication for API endpoints: Accepts Basic Auth or Bearer token.
     
     Priority:
-    1. X-API-Key header (API key auth) - checked first
-    2. Basic Auth (username:password) - checked second
-    3. Bearer token (session-based auth) - checked last
+    1. Basic Auth (username:password) - recommended for external API access
+    2. Bearer token (session-based auth) - for dashboard sessions
     
-    Returns username or 'api_user' for API key authentication.
+    Returns username for authenticated requests.
     """
-    # Try API key first (easiest to check)
-    if x_api_key:
-        if API_KEY and x_api_key == API_KEY:
-            return "api_user"
-        else:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid API key"
-            )
-    
-    # Try Basic Auth
+    # Try Basic Auth first (recommended for external API access)
     if basic_credentials:
         username = authenticate_basic_auth_sync(basic_credentials.username, basic_credentials.password)
         if username:
@@ -154,7 +134,7 @@ async def authenticate_api_request(
                 headers={"WWW-Authenticate": "Basic"}
             )
     
-    # Try Bearer token if no API key or Basic Auth provided
+    # Try Bearer token if no Basic Auth provided (for dashboard sessions)
     if credentials:
         token = credentials.credentials
         username = get_user_from_token(token)
@@ -169,6 +149,7 @@ async def authenticate_api_request(
     # No valid authentication found
     raise HTTPException(
         status_code=401,
-        detail="Authentication required. Provide either: Basic Auth, Bearer token (Authorization: Bearer <token>), or X-API-Key header"
+        detail="Authentication required. Provide Basic Auth (username:password) or Bearer token (Authorization: Bearer <token>)",
+        headers={"WWW-Authenticate": "Basic"}
     )
 

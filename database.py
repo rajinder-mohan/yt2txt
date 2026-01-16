@@ -243,7 +243,8 @@ def update_video_record(
     status: str = None,
     transcript: str = None,
     audio_file_path: str = None,
-    error_message: str = None
+    error_message: str = None,
+    video_url: str = None
 ):
     """Update video record in the database."""
     updates = []
@@ -264,6 +265,10 @@ def update_video_record(
     if error_message is not None:
         updates.append("error_message = %s" if DB_TYPE == "postgres" else "error_message = ?")
         params.append(error_message)
+    
+    if video_url is not None:
+        updates.append("video_url = %s" if DB_TYPE == "postgres" else "video_url = ?")
+        params.append(video_url)
     
     updates.append("updated_at = %s" if DB_TYPE == "postgres" else "updated_at = ?")
     params.append(datetime.now())
@@ -322,20 +327,24 @@ def get_stats():
     with get_db_connection() as conn:
         if DB_TYPE == "postgres":
             total = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions")
-            success = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'success'")
+            processed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status IN ('success', 'processed')")
             failed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'failed'")
             processing = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'processing'")
+            pending = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'pending'")
         else:  # SQLite
             total = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions")
-            success = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'success'")
+            processed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status IN ('success', 'processed')")
             failed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'failed'")
             processing = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'processing'")
+            pending = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'pending'")
         
         return {
             "total": total['count'] if total else 0,
-            "success": success['count'] if success else 0,
+            "success": processed['count'] if processed else 0,  # Keep 'success' for backward compatibility
+            "processed": processed['count'] if processed else 0,
             "failed": failed['count'] if failed else 0,
-            "processing": processing['count'] if processing else 0
+            "processing": processing['count'] if processing else 0,
+            "pending": pending['count'] if pending else 0
         }
 
 

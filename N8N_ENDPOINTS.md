@@ -21,23 +21,23 @@ Replace `YOUR_SERVER_URL` with your actual server URL:
 
 The API supports **two authentication methods**:
 
-### Method 1: API Key Authentication (Recommended for n8n) ⭐
+### Method 1: Basic Auth (Recommended for n8n) ⭐
 
-**Simpler and more suitable for automation!**
+**Simplest and most suitable for automation!**
 
-Set an API key in your `.env` file:
-```bash
-API_KEY=your-secret-api-key-here
-```
-
-Then use the `X-API-Key` header in all requests.
+Use Basic Authentication with your username and password.
 
 **n8n Configuration:**
-- Authentication Type: **Header Auth** or **Generic Credential Type**
-- Header Name: `X-API-Key`
-- Header Value: `your-secret-api-key-here`
+- Authentication Type: **Basic Auth**
+- Username: `admin` (or your username)
+- Password: `admin` (or your password)
 
-**No login required!** Just add the header to each request.
+**No login required!** Just use Basic Auth in each request.
+
+**Example with cURL:**
+```bash
+curl -u "username:password" "https://your-server.com/api/videos"
+```
 
 ---
 
@@ -90,7 +90,7 @@ This endpoint does everything in one call: gets video IDs, transcribes all video
 **Option A: API Key (Recommended)**
 ```
 Content-Type: application/json
-X-API-Key: your-api-key-here
+Authorization: Basic base64(username:password)
 ```
 
 **Option B: Bearer Token**
@@ -153,8 +153,9 @@ Authorization: Bearer YOUR_AUTH_TOKEN
 - Method: `POST`
 - URL: `{{ $env.SERVER_URL }}/api/channel/process`
 - Authentication: **Header Auth** or **Generic Credential Type**
-  - Header Name: `X-API-Key`
-  - Header Value: `{{ $env.API_KEY }}` (set API_KEY in n8n environment variables)
+  - Authentication Type: **Basic Auth**
+  - Username: `{{ $env.API_USERNAME }}` (set API_USERNAME in n8n environment variables)
+  - Password: `{{ $env.API_PASSWORD }}` (set API_PASSWORD in n8n environment variables)
 - Body Content Type: JSON
 - Body: Use the JSON payload above
 
@@ -339,7 +340,7 @@ Change the password for the authenticated user.
 **Option A: API Key (Recommended)**
 ```
 Content-Type: application/json
-X-API-Key: your-api-key-here
+Authorization: Basic base64(username:password)
 ```
 
 **Option B: Bearer Token**
@@ -380,7 +381,7 @@ Authorization: Bearer YOUR_AUTH_TOKEN
 **n8n Configuration:**
 - Method: `POST`
 - URL: `{{ $env.SERVER_URL }}/api/change-password`
-- Authentication: Header Auth (X-API-Key) or Bearer Token
+- Authentication: Basic Auth (username:password) or Bearer Token
 - Body Content Type: JSON
 - Body: Use the JSON payload above
 
@@ -417,7 +418,7 @@ Check if the service is running.
 
 2. **HTTP Request Node**
    - `POST /api/channel/process` with channel URL
-   - Use **Header Auth** with `X-API-Key` header
+   - Use **Basic Auth** with username and password
    - No login required!
 
 3. **Done!** Results are saved to DB
@@ -464,13 +465,14 @@ SERVER_URL=http://localhost:8001
 # or
 SERVER_URL=https://your-production-domain.com
 
-API_KEY=your-api-key-from-env-file
+API_USERNAME=your-username
+API_PASSWORD=your-password
 DEEPGRAM_API_KEY=your-deepgram-api-key
 ```
 
-Then use in nodes: `{{ $env.SERVER_URL }}` and `{{ $env.API_KEY }}`
+Then use in nodes: `{{ $env.SERVER_URL }}` with Basic Auth using `{{ $env.API_USERNAME }}` and `{{ $env.API_PASSWORD }}`
 
-**Important:** Make sure to set `API_KEY` in your server's `.env` file to match the value in n8n!
+**Important:** Use Basic Auth with your admin username and password for all API requests!
 
 ---
 

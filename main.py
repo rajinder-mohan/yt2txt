@@ -28,7 +28,24 @@ from email_service import send_channel_processing_results
 # Load environment variables from .env file
 load_dotenv()
 
-app = FastAPI(title="YouTube Audio Transcription Service", version="1.0.0")
+from fastapi.security import HTTPBasic
+
+# Configure Basic Auth for Swagger
+basic_auth = HTTPBasic()
+
+app = FastAPI(
+    title="YouTube Audio Transcription Service", 
+    version="1.0.0",
+    description="""
+    YouTube Audio Transcription Service API.
+    
+    **Authentication:**
+    - Use Basic Auth (username:password) for all API endpoints
+    - Bearer token authentication is also supported for dashboard sessions
+    
+    All API endpoints require authentication.
+    """
+)
 
 def cookie_string_to_netscape(cookie_string: str, domain: str = ".youtube.com") -> str:
     """
@@ -380,8 +397,8 @@ async def transcribe_videos(request: VideoRequest):
             db_record = get_video_record(video_id)
             
             if db_record:
-                # If we have a successful transcript, return it
-                if db_record['status'] == 'success' and db_record['transcript']:
+                # If we have a processed transcript, return it
+                if db_record['status'] in ['success', 'processed'] and db_record['transcript']:
                     success_results.append(TranscriptResponse(
                         video_id=video_id,
                         video_url=db_record.get('video_url') or original_input,
@@ -401,17 +418,23 @@ async def transcribe_videos(request: VideoRequest):
                     ))
                     continue
                 
+                # If status is pending or processing, continue with processing
                 # If we have an audio file path from previous attempt, use it
                 if db_record.get('audio_file_path') and os.path.exists(db_record['audio_file_path']):
                     audio_file_path = db_record['audio_file_path']
+                    # Update status to processing
+                    update_video_record(video_id, status="processing")
                 else:
-                    # Create or update record
-                    create_video_record(video_id, original_input, "processing")
+                    # Update record to processing
+                    if db_record['status'] == 'pending':
+                        update_video_record(video_id, status="processing", video_url=original_input)
+                    else:
+                        create_video_record(video_id, original_input, "processing")
                     # Download audio
                     audio_file_path = download_audio(video_id, temp_dir)
                     update_video_record(video_id, audio_file_path=audio_file_path)
             else:
-                # Create new record
+                # Create new record with processing status
                 create_video_record(video_id, original_input, "processing")
                 # Download audio
                 audio_file_path = download_audio(video_id, temp_dir)
@@ -420,10 +443,10 @@ async def transcribe_videos(request: VideoRequest):
             # Transcribe audio
             transcript = transcribe_audio(audio_file_path, api_key)
             
-            # Update database with success
+            # Update database with processed status (success)
             update_video_record(
                 video_id,
-                status="success",
+                status="processed",
                 transcript=transcript
             )
             
@@ -446,7 +469,7 @@ async def transcribe_videos(request: VideoRequest):
         except Exception as e:
             error_msg = str(e)
             
-            # Update database with failure
+            # Update database with failure status and reason
             if db_record and db_record['status'] != 'failed':
                 update_video_record(
                     video_id,
@@ -457,6 +480,13 @@ async def transcribe_videos(request: VideoRequest):
                 create_video_record(video_id, original_input, "failed")
                 update_video_record(
                     video_id,
+                    error_message=error_msg
+                )
+            else:
+                # Update existing failed record with new error message
+                update_video_record(
+                    video_id,
+                    status="failed",
                     error_message=error_msg
                 )
             
@@ -713,18 +743,33 @@ async def get_channel_videos(request: ChannelRequest):
             exclude_shorts=True
         )
         
-        # Convert to ChannelVideoInfo objects
-        videos = [
-            ChannelVideoInfo(
-                video_id=video['video_id'],
-                video_url=video['video_url'],
-                title=video['title'],
-                duration=video.get('duration'),
-                view_count=video.get('view_count'),
-                upload_date=video.get('upload_date')
-            )
-            for video in videos_data
-        ]
+        # Convert to ChannelVideoInfo objects and store in database
+        videos = []
+        stored_count = 0
+        
+        for video_data in videos_data:
+            video_id = video_data['video_id']
+            video_url = video_data['video_url']
+            
+            # Check if video already exists in database
+            existing_record = get_video_record(video_id)
+            
+            if not existing_record:
+                # Store new video with "pending" status
+                create_video_record(video_id, video_url, status="pending")
+                stored_count += 1
+            elif existing_record['status'] == 'pending':
+                # Update URL if it changed
+                update_video_record(video_id, video_url=video_url)
+            
+            videos.append(ChannelVideoInfo(
+                video_id=video_id,
+                video_url=video_url,
+                title=video_data['title'],
+                duration=video_data.get('duration'),
+                view_count=video_data.get('view_count'),
+                upload_date=video_data.get('upload_date')
+            ))
         
         if not videos:
             raise HTTPException(
@@ -814,7 +859,7 @@ class ChangePasswordRequest(BaseModel):
     """Request model for changing password."""
     current_password: str
     new_password: str
-    username: Optional[str] = Field(None, description="Username (required if using API key, optional if using Bearer token)")
+    username: Optional[str] = Field(None, description="Username (optional, defaults to authenticated user)")
 
 
 @app.post("/api/change-password")
@@ -825,24 +870,13 @@ async def change_password(
     """
     Change password for the authenticated user.
     
-    Requires authentication (Bearer token or API key).
-    - If using Bearer token: username is determined from token
-    - If using API key: username must be provided in request body
+    Requires authentication (Basic Auth or Bearer token).
+    Username is determined from the authenticated session.
     
     User must provide current password for verification.
     """
-    # Determine which username to update
-    if user == "api_user":
-        # API key authentication - require username in request
-        if not request.username:
-            raise HTTPException(
-                status_code=400,
-                detail="Username is required when using API key authentication"
-            )
-        target_username = request.username
-    else:
-        # Bearer token authentication - use authenticated user
-        target_username = user
+    # Use authenticated username (from Basic Auth or Bearer token)
+    target_username = user
     
     # Verify current password
     if not authenticate_user(target_username, request.current_password):
@@ -878,6 +912,67 @@ async def change_password(
 async def get_all_videos_endpoint(user: str = Depends(authenticate_api_request)):
     """Get all videos with their status. Supports Bearer token or API key authentication."""
     return get_all_videos()
+
+
+@app.get("/api/videos")
+async def get_videos_endpoint(
+    status: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    Get videos with optional filtering.
+    
+    Query parameters:
+    - status: Filter by status (pending, processing, processed, failed)
+    - limit: Maximum number of results (default: all)
+    - offset: Number of results to skip (default: 0)
+    
+    Supports Basic Auth, Bearer token, or API key authentication.
+    """
+    from database import get_db_connection, DB_TYPE, fetch_all
+    
+    query = "SELECT video_id, video_url, status, transcript, error_message, created_at, updated_at FROM video_transcriptions"
+    params = []
+    conditions = []
+    
+    if status:
+        if status in ['pending', 'processing', 'processed', 'failed', 'success']:
+            # Support both 'success' and 'processed' for backward compatibility
+            if status == 'processed':
+                conditions.append("status IN ('success', 'processed')")
+            elif status == 'success':
+                conditions.append("status IN ('success', 'processed')")
+            else:
+                conditions.append("status = %s" if DB_TYPE == "postgres" else "status = ?")
+                params.append(status)
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid status. Must be one of: pending, processing, processed, failed"
+            )
+    
+    if conditions:
+        query += " WHERE " + " AND ".join(conditions)
+    
+    query += " ORDER BY updated_at DESC"
+    
+    if limit:
+        query += " LIMIT %s" if DB_TYPE == "postgres" else " LIMIT ?"
+        params.append(limit)
+        
+        if offset:
+            query += " OFFSET %s" if DB_TYPE == "postgres" else " OFFSET ?"
+            params.append(offset)
+    
+    with get_db_connection() as conn:
+        videos = fetch_all(conn, query, tuple(params) if params else None)
+    
+    return {
+        "total": len(videos),
+        "videos": videos
+    }
 
 
 @app.get("/api/admin/stats")
@@ -978,10 +1073,10 @@ async def process_channel_videos(
                 # Check database for existing record
                 db_record = get_video_record(video_id)
                 
-                if db_record and db_record['status'] == 'success' and db_record['transcript']:
+                if db_record and db_record['status'] in ['success', 'processed'] and db_record['transcript']:
                     # Use cached transcript
                     transcript = db_record['transcript']
-                    status = "success"
+                    status = "processed"
                     success_count += 1
                 elif db_record and db_record['status'] == 'failed':
                     # Skip failed videos
@@ -1001,7 +1096,7 @@ async def process_channel_videos(
                     
                     # Transcribe
                     transcript = transcribe_audio(audio_file_path, api_key)
-                    update_video_record(video_id, status="success", transcript=transcript)
+                    update_video_record(video_id, status="processed", transcript=transcript)
                     
                     # Delete audio file
                     if audio_file_path and os.path.exists(audio_file_path):
@@ -1011,7 +1106,7 @@ async def process_channel_videos(
                         except Exception as e:
                             print(f"Warning: Could not delete audio file {audio_file_path}: {e}")
                     
-                    status = "success"
+                    status = "processed"
                     success_count += 1
                 
             except Exception as e:
@@ -1035,7 +1130,7 @@ async def process_channel_videos(
                 'video_url': video_url,
                 'title': video_title,
                 'status': status,
-                'transcript': transcript if status == 'success' else None,
+                'transcript': transcript if status in ['success', 'processed'] else None,
                 'error': error_msg if status == 'failed' else None
             })
         
@@ -1189,7 +1284,7 @@ async def delete_user(username: str, user: str = Depends(authenticate_api_reques
     from database import get_db_connection, DB_TYPE
     
     # Prevent deleting yourself
-    if user != "api_user" and username == user:
+    if username == user:
         raise HTTPException(
             status_code=400,
             detail="You cannot delete your own account"
