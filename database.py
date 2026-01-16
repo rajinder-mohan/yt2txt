@@ -123,29 +123,29 @@ def fetch_all(conn, query: str, params: tuple = None) -> list:
 def init_database():
     """Initialize the database and create tables if they don't exist."""
     with get_db_connection() as conn:
-            # Video transcriptions table
-            if DB_TYPE == "postgres":
-                cursor = conn.cursor()
-                cursor.execute("""
-                    CREATE TABLE IF NOT EXISTS video_transcriptions (
-                        id SERIAL PRIMARY KEY,
-                        video_id VARCHAR(255) NOT NULL UNIQUE,
-                        video_url TEXT,
-                        status VARCHAR(50) NOT NULL,
-                        transcript TEXT,
-                        audio_file_path TEXT,
-                        error_message TEXT,
-                        title TEXT,
-                        duration INTEGER,
-                        view_count BIGINT,
-                        upload_date DATE,
-                        channel_name TEXT,
-                        channel_id TEXT,
-                        metadata JSONB,
-                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                    )
-                """)
+        # Video transcriptions table
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS video_transcriptions (
+                    id SERIAL PRIMARY KEY,
+                    video_id VARCHAR(255) NOT NULL UNIQUE,
+                    video_url TEXT,
+                    status VARCHAR(50) NOT NULL,
+                    transcript TEXT,
+                    audio_file_path TEXT,
+                    error_message TEXT,
+                    title TEXT,
+                    duration INTEGER,
+                    view_count BIGINT,
+                    upload_date DATE,
+                    channel_name TEXT,
+                    channel_id TEXT,
+                    metadata JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_id ON video_transcriptions(video_id)
             """)
@@ -173,7 +173,7 @@ def init_database():
                 )
             """)
             cursor.close()
-        else:              # SQLite
+        else:  # SQLite
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS video_transcriptions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
