@@ -123,22 +123,29 @@ def fetch_all(conn, query: str, params: tuple = None) -> list:
 def init_database():
     """Initialize the database and create tables if they don't exist."""
     with get_db_connection() as conn:
-        # Video transcriptions table
-        if DB_TYPE == "postgres":
-            cursor = conn.cursor()
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS video_transcriptions (
-                    id SERIAL PRIMARY KEY,
-                    video_id VARCHAR(255) NOT NULL UNIQUE,
-                    video_url TEXT,
-                    status VARCHAR(50) NOT NULL,
-                    transcript TEXT,
-                    audio_file_path TEXT,
-                    error_message TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
+            # Video transcriptions table
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS video_transcriptions (
+                        id SERIAL PRIMARY KEY,
+                        video_id VARCHAR(255) NOT NULL UNIQUE,
+                        video_url TEXT,
+                        status VARCHAR(50) NOT NULL,
+                        transcript TEXT,
+                        audio_file_path TEXT,
+                        error_message TEXT,
+                        title TEXT,
+                        duration INTEGER,
+                        view_count BIGINT,
+                        upload_date DATE,
+                        channel_name TEXT,
+                        channel_id TEXT,
+                        metadata JSONB,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
             cursor.execute("""
                 CREATE INDEX IF NOT EXISTS idx_video_id ON video_transcriptions(video_id)
             """)
@@ -166,7 +173,7 @@ def init_database():
                 )
             """)
             cursor.close()
-        else:  # SQLite
+        else:              # SQLite
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS video_transcriptions (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -176,6 +183,13 @@ def init_database():
                     transcript TEXT,
                     audio_file_path TEXT,
                     error_message TEXT,
+                    title TEXT,
+                    duration INTEGER,
+                    view_count INTEGER,
+                    upload_date TEXT,
+                    channel_name TEXT,
+                    channel_id TEXT,
+                    metadata TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -207,6 +221,49 @@ def init_database():
                 )
             """)
         
+        # Add metadata columns if they don't exist (migration for existing databases)
+        _add_metadata_columns(conn)
+
+
+def _add_metadata_columns(conn):
+    """Add metadata columns to existing video_transcriptions table if they don't exist."""
+    import json
+    metadata_columns = [
+        ("title", "TEXT"),
+        ("duration", "INTEGER" if DB_TYPE == "postgres" else "INTEGER"),
+        ("view_count", "BIGINT" if DB_TYPE == "postgres" else "INTEGER"),
+        ("upload_date", "DATE" if DB_TYPE == "postgres" else "TEXT"),
+        ("channel_name", "TEXT"),
+        ("channel_id", "TEXT"),
+        ("metadata", "JSONB" if DB_TYPE == "postgres" else "TEXT"),
+    ]
+    
+    for column_name, column_type in metadata_columns:
+        try:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                # Check if column exists
+                cursor.execute("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name='video_transcriptions' AND column_name=%s
+                """, (column_name,))
+                if not cursor.fetchone():
+                    cursor.execute(f"ALTER TABLE video_transcriptions ADD COLUMN {column_name} {column_type}")
+                    conn.commit()
+                cursor.close()
+            else:  # SQLite
+                # SQLite doesn't support ALTER TABLE ADD COLUMN IF NOT EXISTS easily
+                # Try to add column and ignore if it exists
+                try:
+                    conn.execute(f"ALTER TABLE video_transcriptions ADD COLUMN {column_name} {column_type}")
+                    conn.commit()
+                except Exception:
+                    # Column likely already exists, ignore
+                    pass
+        except Exception as e:
+            # Column might already exist or other error, continue
+            print(f"Note: Could not add column {column_name}: {e}")
 
 
 def get_video_record(video_id: str) -> Optional[Dict]:
@@ -218,24 +275,40 @@ def get_video_record(video_id: str) -> Optional[Dict]:
             return fetch_one(conn, "SELECT * FROM video_transcriptions WHERE video_id = ?", (video_id,))
 
 
-def create_video_record(video_id: str, video_url: str = None, status: str = "processing"):
-    """Create a new video record in the database."""
+def create_video_record(
+    video_id: str, 
+    video_url: str = None, 
+    status: str = "processing",
+    title: str = None,
+    duration: int = None,
+    view_count: int = None,
+    upload_date: str = None,
+    channel_name: str = None,
+    channel_id: str = None,
+    metadata: dict = None
+):
+    """Create a new video record in the database with optional metadata."""
+    import json
     with get_db_connection() as conn:
         if DB_TYPE == "postgres":
             cursor = conn.cursor()
+            # Convert metadata dict to JSON string for PostgreSQL JSONB
+            metadata_json = json.dumps(metadata) if metadata else None
             cursor.execute("""
                 INSERT INTO video_transcriptions 
-                (video_id, video_url, status, created_at, updated_at)
-                VALUES (%s, %s, %s, %s, %s)
+                (video_id, video_url, status, title, duration, view_count, upload_date, channel_name, channel_id, metadata, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s::jsonb, %s, %s)
                 ON CONFLICT (video_id) DO NOTHING
-            """, (video_id, video_url, status, datetime.now(), datetime.now()))
+            """, (video_id, video_url, status, title, duration, view_count, upload_date, channel_name, channel_id, metadata_json, datetime.now(), datetime.now()))
             cursor.close()
         else:  # SQLite
+            # Convert metadata dict to JSON string for SQLite TEXT
+            metadata_json = json.dumps(metadata) if metadata else None
             conn.execute("""
                 INSERT OR IGNORE INTO video_transcriptions 
-                (video_id, video_url, status, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?)
-            """, (video_id, video_url, status, datetime.now(), datetime.now()))
+                (video_id, video_url, status, title, duration, view_count, upload_date, channel_name, channel_id, metadata, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (video_id, video_url, status, title, duration, view_count, upload_date, channel_name, channel_id, metadata_json, datetime.now(), datetime.now()))
 
 
 def update_video_record(
@@ -244,9 +317,17 @@ def update_video_record(
     transcript: str = None,
     audio_file_path: str = None,
     error_message: str = None,
-    video_url: str = None
+    video_url: str = None,
+    title: str = None,
+    duration: int = None,
+    view_count: int = None,
+    upload_date: str = None,
+    channel_name: str = None,
+    channel_id: str = None,
+    metadata: dict = None
 ):
-    """Update video record in the database."""
+    """Update video record in the database with optional metadata."""
+    import json
     updates = []
     params = []
     
@@ -269,6 +350,38 @@ def update_video_record(
     if video_url is not None:
         updates.append("video_url = %s" if DB_TYPE == "postgres" else "video_url = ?")
         params.append(video_url)
+    
+    if title is not None:
+        updates.append("title = %s" if DB_TYPE == "postgres" else "title = ?")
+        params.append(title)
+    
+    if duration is not None:
+        updates.append("duration = %s" if DB_TYPE == "postgres" else "duration = ?")
+        params.append(duration)
+    
+    if view_count is not None:
+        updates.append("view_count = %s" if DB_TYPE == "postgres" else "view_count = ?")
+        params.append(view_count)
+    
+    if upload_date is not None:
+        updates.append("upload_date = %s" if DB_TYPE == "postgres" else "upload_date = ?")
+        params.append(upload_date)
+    
+    if channel_name is not None:
+        updates.append("channel_name = %s" if DB_TYPE == "postgres" else "channel_name = ?")
+        params.append(channel_name)
+    
+    if channel_id is not None:
+        updates.append("channel_id = %s" if DB_TYPE == "postgres" else "channel_id = ?")
+        params.append(channel_id)
+    
+    if metadata is not None:
+        metadata_json = json.dumps(metadata) if metadata else None
+        if DB_TYPE == "postgres":
+            updates.append("metadata = %s::jsonb")
+        else:
+            updates.append("metadata = ?")
+        params.append(metadata_json)
     
     updates.append("updated_at = %s" if DB_TYPE == "postgres" else "updated_at = ?")
     params.append(datetime.now())
@@ -304,22 +417,36 @@ def delete_audio_file_path(video_id: str):
 
 
 def get_all_videos():
-    """Get all videos from database (for admin dashboard)."""
+    """Get all videos from database (for admin dashboard) with metadata."""
+    import json
     with get_db_connection() as conn:
         if DB_TYPE == "postgres":
-            return fetch_all(conn, """
+            videos = fetch_all(conn, """
                 SELECT id, video_id, video_url, status, transcript, error_message, 
+                       title, duration, view_count, upload_date, channel_name, channel_id, metadata,
                        created_at, updated_at
                 FROM video_transcriptions
                 ORDER BY updated_at DESC
             """)
         else:  # SQLite
-            return fetch_all(conn, """
+            videos = fetch_all(conn, """
                 SELECT id, video_id, video_url, status, transcript, error_message, 
+                       title, duration, view_count, upload_date, channel_name, channel_id, metadata,
                        created_at, updated_at
                 FROM video_transcriptions
                 ORDER BY updated_at DESC
             """)
+        
+        # Parse JSON metadata for each video
+        for video in videos:
+            if video.get('metadata'):
+                try:
+                    if isinstance(video['metadata'], str):
+                        video['metadata'] = json.loads(video['metadata'])
+                except (json.JSONDecodeError, TypeError):
+                    video['metadata'] = None
+        
+        return videos
 
 
 def get_stats():
@@ -331,12 +458,14 @@ def get_stats():
             failed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'failed'")
             processing = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'processing'")
             pending = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'pending'")
+            rate_limited = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'rate_limited'")
         else:  # SQLite
             total = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions")
             processed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status IN ('success', 'processed')")
             failed = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'failed'")
             processing = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'processing'")
             pending = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'pending'")
+            rate_limited = fetch_one(conn, "SELECT COUNT(*) as count FROM video_transcriptions WHERE status = 'rate_limited'")
         
         return {
             "total": total['count'] if total else 0,
@@ -344,7 +473,8 @@ def get_stats():
             "processed": processed['count'] if processed else 0,
             "failed": failed['count'] if failed else 0,
             "processing": processing['count'] if processing else 0,
-            "pending": pending['count'] if pending else 0
+            "pending": pending['count'] if pending else 0,
+            "rate_limited": rate_limited['count'] if rate_limited else 0
         }
 
 

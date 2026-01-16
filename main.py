@@ -292,8 +292,13 @@ def normalize_video_input(video_ids: Optional[List[str]], video_urls: Optional[L
     return unique_result
 
 
-def download_audio(video_id: str, output_dir: str) -> str:
-    """Download audio from YouTube video and return the file path."""
+def download_audio(video_id: str, output_dir: str) -> tuple[str, dict]:
+    """
+    Download audio from YouTube video and return the file path and metadata.
+    
+    Returns:
+        tuple: (audio_file_path, metadata_dict)
+    """
     url = f"https://www.youtube.com/watch?v={video_id}"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -318,6 +323,86 @@ def download_audio(video_id: str, output_dir: str) -> str:
 
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # First extract info to get metadata
+            info = ydl.extract_info(url, download=False)
+            
+            # Extract ALL available metadata from yt-dlp
+            # Store everything we can get, not just common fields
+            metadata = {}
+            
+            # Basic video info
+            basic_fields = [
+                'title', 'duration', 'view_count', 'upload_date', 'release_date', 
+                'modified_date', 'availability', 'age_limit', 'description', 'thumbnail',
+                'thumbnails', 'fps', 'width', 'height', 'resolution', 'format', 'format_id',
+                'ext', 'filesize', 'filesize_approx', 'tbr', 'abr', 'acodec', 'vcodec',
+                'container', 'protocol', 'format_note', 'language', 'language_preference'
+            ]
+            
+            # Channel/Uploader info
+            channel_fields = [
+                'channel', 'channel_id', 'channel_url', 'channel_follower_count',
+                'uploader', 'uploader_id', 'uploader_url', 'creator', 'artist'
+            ]
+            
+            # Engagement metrics
+            engagement_fields = [
+                'like_count', 'dislike_count', 'comment_count', 'repost_count',
+                'average_rating', 'playlist_count', 'playlist_id', 'playlist_title',
+                'playlist_index', 'n_entries'
+            ]
+            
+            # Content classification
+            content_fields = [
+                'tags', 'categories', 'genre', 'album', 'track', 'artist',
+                'album_artist', 'release_year', 'release_month', 'release_day'
+            ]
+            
+            # Subtitles and chapters
+            subtitle_fields = [
+                'subtitles', 'automatic_captions', 'chapters', 'chapter_count',
+                'has_drm', 'is_live', 'live_status', 'was_live'
+            ]
+            
+            # Additional metadata
+            additional_fields = [
+                'webpage_url', 'webpage_url_basename', 'original_url', 'display_id',
+                'fulltitle', 'id', 'display_id', 'url', 'extractor', 'extractor_key',
+                'epoch', 'timestamp', 'release_timestamp', 'modified_timestamp',
+                'availability', 'license', 'concurrent_viewers', 'start_time', 'end_time'
+            ]
+            
+            # Collect all fields
+            all_fields = basic_fields + channel_fields + engagement_fields + content_fields + subtitle_fields + additional_fields
+            
+            for field in all_fields:
+                value = info.get(field)
+                if value is not None:
+                    metadata[field] = value
+            
+            # Also store any other fields that might be present (catch-all)
+            # This ensures we don't miss any metadata yt-dlp provides
+            for key, value in info.items():
+                if key not in metadata and value is not None:
+                    # Skip internal yt-dlp fields that aren't useful
+                    if not key.startswith('_') and key not in ['requested_formats', 'requested_subtitles', 'formats']:
+                        try:
+                            # Only store JSON-serializable values
+                            import json
+                            json.dumps(value)
+                            metadata[key] = value
+                        except (TypeError, ValueError):
+                            # Skip non-serializable values
+                            pass
+            
+            # Format upload date if available
+            upload_date = info.get('upload_date')
+            if upload_date and len(upload_date) == 8:
+                formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+            else:
+                formatted_date = upload_date
+            
+            # Now download the audio
             ydl.download([url])
         
         # Find the downloaded file
@@ -331,7 +416,16 @@ def download_audio(video_id: str, output_dir: str) -> str:
         if not audio_file:
             raise FileNotFoundError(f"Audio file not found for video {video_id}")
         
-        return audio_file
+        # Return file path and metadata
+        return audio_file, {
+            'metadata': metadata,
+            'title': metadata.get('title'),
+            'duration': metadata.get('duration'),
+            'view_count': metadata.get('view_count'),
+            'upload_date': formatted_date,
+            'channel_name': metadata.get('channel') or metadata.get('uploader'),
+            'channel_id': metadata.get('channel_id') or metadata.get('uploader_id'),
+        }
     except Exception as e:
         raise Exception(f"Failed to download audio: {str(e)}")
 
@@ -463,15 +557,35 @@ async def transcribe_videos(request: VideoRequest):
                         update_video_record(video_id, status="processing", video_url=original_input)
                     else:
                         create_video_record(video_id, original_input, "processing")
-                    # Download audio
-                    audio_file_path = download_audio(video_id, temp_dir)
-                    update_video_record(video_id, audio_file_path=audio_file_path)
+                    # Download audio and get metadata
+                    audio_file_path, video_metadata = download_audio(video_id, temp_dir)
+                    update_video_record(
+                        video_id, 
+                        audio_file_path=audio_file_path,
+                        title=video_metadata.get('title'),
+                        duration=video_metadata.get('duration'),
+                        view_count=video_metadata.get('view_count'),
+                        upload_date=video_metadata.get('upload_date'),
+                        channel_name=video_metadata.get('channel_name'),
+                        channel_id=video_metadata.get('channel_id'),
+                        metadata=video_metadata.get('metadata')
+                    )
             else:
                 # Create new record with processing status
                 create_video_record(video_id, original_input, "processing")
-                # Download audio
-                audio_file_path = download_audio(video_id, temp_dir)
-                update_video_record(video_id, audio_file_path=audio_file_path)
+                # Download audio and get metadata
+                audio_file_path, video_metadata = download_audio(video_id, temp_dir)
+                update_video_record(
+                    video_id, 
+                    audio_file_path=audio_file_path,
+                    title=video_metadata.get('title'),
+                    duration=video_metadata.get('duration'),
+                    view_count=video_metadata.get('view_count'),
+                    upload_date=video_metadata.get('upload_date'),
+                    channel_name=video_metadata.get('channel_name'),
+                    channel_id=video_metadata.get('channel_id'),
+                    metadata=video_metadata.get('metadata')
+                )
             
             # Transcribe audio
             transcript = transcribe_audio(audio_file_path, api_key)
@@ -502,6 +616,52 @@ async def transcribe_videos(request: VideoRequest):
         except Exception as e:
             error_msg = str(e)
             
+            # Check if this is a rate limiting error
+            is_rate_limit = (
+                "Sign in to confirm you're not a bot" in error_msg or
+                "rate-limit" in error_msg.lower() or
+                "rate limit" in error_msg.lower() or
+                "rate-limited" in error_msg.lower() or
+                "429" in error_msg or
+                "too many requests" in error_msg.lower() or
+                "session has been rate-limited" in error_msg.lower()
+            )
+            
+            if is_rate_limit:
+                # Mark as rate limited and stop processing
+                print(f"\n⚠️ RATE LIMIT DETECTED for video {video_id}")
+                print(f"Error: {error_msg}")
+                
+                # Mark current video as rate limited
+                if db_record and db_record['status'] not in ['rate_limited', 'failed']:
+                    update_video_record(
+                        video_id,
+                        status="rate_limited",
+                        error_message=f"Rate limited: {error_msg}"
+                    )
+                elif not db_record:
+                    create_video_record(video_id, original_input, "rate_limited")
+                    update_video_record(
+                        video_id,
+                        error_message=f"Rate limited: {error_msg}"
+                    )
+                
+                error_results.append(ErrorResponse(
+                    video_id=video_id,
+                    video_url=original_input,
+                    error=f"Rate limited - processing stopped. Resume later to continue. Original error: {error_msg}",
+                    status="error"
+                ))
+                
+                # Break the loop - stop processing remaining videos
+                remaining = len(video_list) - idx - 1
+                print(f"\n🛑 Processing STOPPED due to rate limiting.")
+                print(f"📊 Progress: {idx + 1}/{len(video_list)} videos processed")
+                print(f"⏳ {remaining} videos remaining (will be skipped on next run)")
+                print(f"💡 Next run will automatically skip already processed videos and resume from here.")
+                break
+            
+            # Regular error handling (not rate limit)
             # Update database with failure status and reason
             if db_record and db_record['status'] != 'failed':
                 update_video_record(
@@ -731,13 +891,36 @@ def extract_all_channel_videos(channel_url: str, max_results: Optional[int] = No
                     else:
                         formatted_date = upload_date
                     
+                    # Extract all available metadata from entry
+                    video_metadata = {}
+                    # Common fields
+                    for field in ['title', 'duration', 'view_count', 'upload_date', 'description',
+                                 'thumbnail', 'channel', 'channel_id', 'uploader', 'uploader_id',
+                                 'like_count', 'comment_count', 'tags', 'categories', 'fps',
+                                 'width', 'height', 'format', 'ext', 'filesize', 'language',
+                                 'release_date', 'modified_date', 'availability', 'age_limit']:
+                        value = entry.get(field)
+                        if value is not None:
+                            video_metadata[field] = value
+                    
+                    # Store any other available fields (catch-all for any additional metadata)
+                    for key, value in entry.items():
+                        if key not in video_metadata and value is not None and not key.startswith('_'):
+                            try:
+                                import json
+                                json.dumps(value)
+                                video_metadata[key] = value
+                            except (TypeError, ValueError):
+                                pass
+                    
                     videos.append({
                         'video_id': video_id,
                         'video_url': video_url,
                         'title': title,
                         'duration': duration,
                         'view_count': view_count,
-                        'upload_date': formatted_date
+                        'upload_date': formatted_date,
+                        'metadata': video_metadata  # Store ALL metadata
                     })
                     
                     # Stop if we've reached max_results
@@ -783,17 +966,70 @@ async def get_channel_videos(request: ChannelRequest):
         for video_data in videos_data:
             video_id = video_data['video_id']
             video_url = video_data['video_url']
+            title = video_data.get('title')
+            duration = video_data.get('duration')
+            view_count = video_data.get('view_count')
+            upload_date = video_data.get('upload_date')
+            
+            # Get full metadata from video_data if available
+            video_metadata = video_data.get('metadata', {})
+            
+            # Prepare metadata dict with all available data
+            # Use metadata from video_data if available, otherwise use individual fields
+            if video_metadata:
+                metadata = video_metadata.copy()
+                # Ensure we have the basic fields
+                if title and 'title' not in metadata:
+                    metadata['title'] = title
+                if duration is not None and 'duration' not in metadata:
+                    metadata['duration'] = duration
+                if view_count is not None and 'view_count' not in metadata:
+                    metadata['view_count'] = view_count
+                if upload_date and 'upload_date' not in metadata:
+                    metadata['upload_date'] = upload_date
+                if channel_name and 'channel_name' not in metadata:
+                    metadata['channel_name'] = channel_name
+            else:
+                # Fallback to individual fields
+                metadata = {
+                    'title': title,
+                    'duration': duration,
+                    'view_count': view_count,
+                    'upload_date': upload_date,
+                    'channel_name': channel_name,
+                }
+                # Remove None values from metadata
+                metadata = {k: v for k, v in metadata.items() if v is not None}
             
             # Check if video already exists in database
             existing_record = get_video_record(video_id)
             
             if not existing_record:
-                # Store new video with "pending" status
-                create_video_record(video_id, video_url, status="pending")
+                # Store new video with "pending" status and metadata
+                create_video_record(
+                    video_id, 
+                    video_url, 
+                    status="pending",
+                    title=title,
+                    duration=duration,
+                    view_count=view_count,
+                    upload_date=upload_date,
+                    channel_name=channel_name,
+                    metadata=metadata if metadata else None
+                )
                 stored_count += 1
             elif existing_record['status'] == 'pending':
-                # Update URL if it changed
-                update_video_record(video_id, video_url=video_url)
+                # Update URL and metadata if they changed
+                update_video_record(
+                    video_id, 
+                    video_url=video_url,
+                    title=title,
+                    duration=duration,
+                    view_count=view_count,
+                    upload_date=upload_date,
+                    channel_name=channel_name,
+                    metadata=metadata if metadata else None
+                )
             
             videos.append(ChannelVideoInfo(
                 video_id=video_id,
@@ -1132,17 +1368,36 @@ async def process_channel_videos(
                     status = "pending"
                     skipped_count += 1
                     print(f"Skipping video {video_id}: Already in queue (pending)")
-                else:
+                elif db_record and db_record['status'] == 'rate_limited':
+                    # Resume from rate-limited videos (retry them)
+                    print(f"🔄 Resuming rate-limited video {video_id}: Retrying...")
+                    # Update status to processing and continue
+                    update_video_record(video_id, status="processing")
+                    # Fall through to process the video
+                
+                # Process video (new, pending, rate_limited that we're retrying, or processing)
+                if not db_record or db_record['status'] in ['pending', 'rate_limited', 'processing']:
                     # Process video
                     if not db_record:
                         create_video_record(video_id, video_url, "processing")
                     
-                    # Download audio
+                    # Download audio and get metadata
                     if db_record and db_record.get('audio_file_path') and os.path.exists(db_record['audio_file_path']):
                         audio_file_path = db_record['audio_file_path']
+                        # Metadata already stored, skip re-extraction
                     else:
-                        audio_file_path = download_audio(video_id, temp_dir)
-                        update_video_record(video_id, audio_file_path=audio_file_path)
+                        audio_file_path, video_metadata = download_audio(video_id, temp_dir)
+                        update_video_record(
+                            video_id, 
+                            audio_file_path=audio_file_path,
+                            title=video_metadata.get('title'),
+                            duration=video_metadata.get('duration'),
+                            view_count=video_metadata.get('view_count'),
+                            upload_date=video_metadata.get('upload_date'),
+                            channel_name=video_metadata.get('channel_name'),
+                            channel_id=video_metadata.get('channel_id'),
+                            metadata=video_metadata.get('metadata')
+                        )
                     
                     # Transcribe
                     transcript = transcribe_audio(audio_file_path, api_key)
@@ -1161,6 +1416,40 @@ async def process_channel_videos(
                 
             except Exception as e:
                 error_msg = str(e)
+                
+                # Check if this is a rate limiting error
+                is_rate_limit = (
+                    "Sign in to confirm you're not a bot" in error_msg or
+                    "rate-limit" in error_msg.lower() or
+                    "rate limit" in error_msg.lower() or
+                    "rate-limited" in error_msg.lower() or
+                    "429" in error_msg or
+                    "too many requests" in error_msg.lower()
+                )
+                
+                if is_rate_limit:
+                    # Mark as rate limited and stop processing
+                    print(f"⚠️ RATE LIMIT DETECTED for video {video_id}. Stopping processing.")
+                    print(f"Error: {error_msg}")
+                    
+                    # Mark current video as rate limited
+                    db_record = get_video_record(video_id)
+                    if db_record and db_record['status'] not in ['rate_limited', 'failed']:
+                        update_video_record(video_id, status="rate_limited", error_message=f"Rate limited: {error_msg}")
+                    elif not db_record:
+                        create_video_record(video_id, video_url, "rate_limited")
+                        update_video_record(video_id, error_message=f"Rate limited: {error_msg}")
+                    
+                    status = "rate_limited"
+                    failed_count += 1
+                    
+                    # Break the loop - stop processing remaining videos
+                    remaining = len(video_list) - idx - 1
+                    print(f"🛑 Processing stopped due to rate limiting. {remaining} videos remaining.")
+                    print(f"💡 Next run will automatically skip already processed videos and resume from here.")
+                    break
+                
+                # Regular error handling (not rate limit)
                 status = "failed"
                 failed_count += 1
                 
