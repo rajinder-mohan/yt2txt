@@ -197,6 +197,53 @@
                     <div id="webhookStatus" class="channel-status" style="margin-top: 1rem;"></div>
                 </div>
             </div>
+            
+            <div class="channel-submit-section" style="margin-top: 2rem;">
+                <h2>YouTube Cookies</h2>
+                <p style="margin-bottom: 1.5rem; color: #666;">
+                    Configure YouTube cookies to bypass bot detection. Cookies help prevent "Sign in to confirm you're not a bot" errors.
+                </p>
+                
+                <div class="settings-form-section">
+                    <div class="form-group" style="margin-bottom: 1rem;">
+                        <label for="youtubeCookiesInput" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
+                            Cookie String:
+                        </label>
+                        <textarea 
+                            id="youtubeCookiesInput" 
+                            placeholder="Paste cookie string from browser here (format: name1=value1; name2=value2; ...)" 
+                            rows="4"
+                            style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-size: 0.9rem; font-family: monospace;"
+                        ></textarea>
+                        <div style="margin-top: 0.5rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #666;">
+                            <strong>How to get cookies:</strong>
+                            <ol style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+                                <li>Open YouTube in your browser</li>
+                                <li>Open Developer Tools (F12 or Right-click → Inspect)</li>
+                                <li>Go to the <strong>Network</strong> tab</li>
+                                <li>Visit any YouTube page (e.g., https://www.youtube.com/@channelname)</li>
+                                <li>Find a request to <code>youtube.com</code> in the network list</li>
+                                <li>Click on the request → Go to <strong>Headers</strong> tab</li>
+                                <li>Scroll down to find the <strong>cookie:</strong> header</li>
+                                <li>Copy the entire cookie value (everything after "cookie: ")</li>
+                                <li>Paste it in the field above</li>
+                            </ol>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+                        <button id="saveCookiesBtn" class="btn-primary">Save Cookies</button>
+                        <button id="testCookiesBtn" class="btn-secondary">Test Cookies</button>
+                        <button id="deleteCookiesBtn" class="btn-secondary" style="background: #dc3545;">Delete Cookies</button>
+                    </div>
+                    
+                    <div id="cookiesStatus" class="channel-status" style="margin-top: 1rem;"></div>
+                    
+                    <div id="cookiesInfo" style="margin-top: 1rem; padding: 0.75rem; background: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 4px; font-size: 0.85rem; color: #0c5460;">
+                        <strong>Current Status:</strong> <span id="cookiesStatusText">Loading...</span>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

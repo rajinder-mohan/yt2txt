@@ -310,12 +310,33 @@ DEEPGRAM_API_KEY=your-deepgram-api-key-here
 # Default Admin User Credentials
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin
+
+# YouTube Cookies (Optional - helps bypass bot detection)
+# Option 1: Use cookies file (recommended)
+YOUTUBE_COOKIES_FILE=/path/to/cookies.txt
+
+# Option 2: Extract from browser (requires browser_cookie3)
+# YOUTUBE_COOKIES_BROWSER=chrome
 ```
 
 **Environment Variables:**
 - `DEEPGRAM_API_KEY`: Deepgram API key (required) - Get from https://console.deepgram.com/
 - `ADMIN_USERNAME`: Default admin username (default: `admin`)
 - `ADMIN_PASSWORD`: Default admin password (default: `admin`)
+
+**YouTube Cookies (Optional but Recommended):**
+If you're getting "Sign in to confirm you're not a bot" errors from YouTube, configure cookies:
+
+- `YOUTUBE_COOKIES_FILE`: Path to cookies file in Netscape format (e.g., `/path/to/cookies.txt`)
+  - Export cookies from your browser using extensions like "Get cookies.txt LOCALLY" or "cookies.txt"
+  - Export cookies from youtube.com in Netscape format
+  - Save the file and set this variable to the file path
+
+- `YOUTUBE_COOKIES_BROWSER`: Browser to extract cookies from (e.g., `chrome`, `firefox`, `edge`, `safari`)
+  - Requires `browser_cookie3` package: `pip install browser_cookie3`
+  - Automatically extracts cookies from your browser
+
+**Note:** Cookies help bypass YouTube's bot detection. Without cookies, you may encounter rate limiting or blocking.
 
 **Database Configuration:**
 - `DB_TYPE`: Database type - `sqlite` (default) or `postgres`
