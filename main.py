@@ -18,7 +18,9 @@ from database import (
     update_video_record,
     delete_audio_file_path,
     get_all_videos,
-    get_stats
+    get_stats,
+    get_setting,
+    set_setting
 )
 from auth import authenticate_user, create_session, delete_session, get_current_user, authenticate_api_request, update_user_password, active_sessions
 from email_service import send_channel_processing_results
@@ -470,16 +472,20 @@ class ChannelResponse(BaseModel):
 
 def normalize_channel_url(channel_url: str) -> str:
     """
-    Normalize channel URL to ensure we get the videos page.
+    Normalize channel URL to ensure we get the videos page (excluding shorts).
     If the URL is a channel URL without /videos, append it.
     """
     channel_url = channel_url.strip()
     
+    # Remove /shorts if present - we don't want shorts
+    if '/shorts' in channel_url:
+        channel_url = channel_url.replace('/shorts', '/videos')
+    
     # If it's already a videos page, return as is
-    if '/videos' in channel_url or '/streams' in channel_url or '/shorts' in channel_url:
+    if '/videos' in channel_url or '/streams' in channel_url:
         return channel_url
     
-    # If it's a channel URL, append /videos to get all videos
+    # If it's a channel URL, append /videos to get all videos (not shorts)
     if '@' in channel_url or '/channel/' in channel_url or '/c/' in channel_url or '/user/' in channel_url:
         # Remove trailing slash if present
         if channel_url.endswith('/'):
@@ -491,10 +497,115 @@ def normalize_channel_url(channel_url: str) -> str:
     return channel_url
 
 
+def extract_all_channel_videos(channel_url: str, max_results: Optional[int] = None, exclude_shorts: bool = True):
+    """
+    Extract all videos from a channel with pagination support.
+    Excludes shorts by default.
+    
+    Returns:
+        tuple: (videos_list, channel_name)
+    """
+    videos = []
+    channel_name = None
+    
+    # Configure yt-dlp to extract all videos with pagination
+    ydl_opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "extract_flat": False,  # Get full video info
+        "playlistend": max_results if max_results else None,
+        # Use extractor args to get all videos (not just recent) and exclude shorts
+        "extractor_args": {
+            "youtube": {
+                "tab": "all",  # Get all videos, not just recent
+            }
+        },
+        # Ignore shorts playlist
+        "ignoreerrors": True,
+    }
+    
+    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+        # Extract channel information with automatic pagination
+        # process=True (default) ensures yt-dlp paginates through all videos
+        info = ydl.extract_info(channel_url, download=False)
+        
+        # Get channel name
+        channel_name = info.get('channel') or info.get('uploader') or info.get('channel_id')
+        
+        # Process entries (yt-dlp automatically handles pagination)
+        if 'entries' in info:
+            entries = info['entries']
+            if entries:
+                for entry in entries:
+                    if entry is None:
+                        continue
+                    
+                    video_id = entry.get('id')
+                    if not video_id:
+                        continue
+                    
+                    # Get video metadata
+                    video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+                    title = entry.get('title', 'Unknown Title')
+                    duration = entry.get('duration')
+                    view_count = entry.get('view_count')
+                    upload_date = entry.get('upload_date')
+                    
+                    # Skip shorts if enabled
+                    if exclude_shorts:
+                        # Check URL for shorts
+                        if '/shorts/' in video_url or '/shorts' in video_url:
+                            continue
+                        
+                        # Check title for shorts indicator
+                        title_lower = title.lower()
+                        if '#shorts' in title_lower or '#Shorts' in title_lower:
+                            continue
+                        
+                        # Check duration (shorts are typically < 60 seconds)
+                        if duration and duration < 60:
+                            continue
+                        
+                        # Additional check: if duration is None, try to get it
+                        if duration is None:
+                            try:
+                                video_info = ydl.extract_info(video_url, download=False)
+                                duration = video_info.get('duration')
+                                if duration and duration < 60:
+                                    continue
+                            except:
+                                pass
+                    
+                    # Format upload date if available
+                    if upload_date and len(upload_date) == 8:
+                        formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                    else:
+                        formatted_date = upload_date
+                    
+                    videos.append({
+                        'video_id': video_id,
+                        'video_url': video_url,
+                        'title': title,
+                        'duration': duration,
+                        'view_count': view_count,
+                        'upload_date': formatted_date
+                    })
+                    
+                    # Stop if we've reached max_results
+                    if max_results and len(videos) >= max_results:
+                        break
+    
+    return videos, channel_name
+
+
 @app.post("/channel/videos", response_model=ChannelResponse)
 async def get_channel_videos(request: ChannelRequest):
     """
     Get video IDs from a YouTube channel URL using yt-dlp.
+    
+    - Gets ALL videos with pagination (not just recent)
+    - Excludes shorts by default (videos < 60 seconds)
+    - Supports various YouTube channel URL formats
     
     Supports various YouTube channel URL formats:
     - https://www.youtube.com/@channelname
@@ -509,86 +620,30 @@ async def get_channel_videos(request: ChannelRequest):
         channel_url = normalize_channel_url(request.channel_url)
         max_results = request.max_results
         
-        # Configure yt-dlp to extract video information without downloading
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,  # Get full video info
-            "playlistend": max_results if max_results else None,
-        }
+        # Extract all videos (with pagination, excluding shorts)
+        videos_data, channel_name = extract_all_channel_videos(
+            channel_url, 
+            max_results=max_results,
+            exclude_shorts=True
+        )
         
-        videos = []
-        channel_name = None
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            # Extract channel information
-            info = ydl.extract_info(channel_url, download=False)
-            
-            # Get channel name
-            channel_name = info.get('channel') or info.get('uploader') or info.get('channel_id')
-            
-            # Check if it's a playlist/channel with entries
-            if 'entries' in info:
-                # It's a channel or playlist
-                entries = info['entries']
-                if entries:
-                    for entry in entries:
-                        if entry is None:
-                            continue
-                        
-                        video_id = entry.get('id')
-                        if not video_id:
-                            continue
-                        
-                        video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
-                        title = entry.get('title', 'Unknown Title')
-                        duration = entry.get('duration')
-                        view_count = entry.get('view_count')
-                        upload_date = entry.get('upload_date')
-                        
-                        # Format upload date if available
-                        if upload_date and len(upload_date) == 8:
-                            # Format YYYYMMDD to YYYY-MM-DD
-                            formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-                        else:
-                            formatted_date = upload_date
-                        
-                        videos.append(ChannelVideoInfo(
-                            video_id=video_id,
-                            video_url=video_url,
-                            title=title,
-                            duration=duration,
-                            view_count=view_count,
-                            upload_date=formatted_date
-                        ))
-            else:
-                # Single video (shouldn't happen with channel URL, but handle it)
-                video_id = info.get('id')
-                if video_id:
-                    video_url = info.get('url') or f"https://www.youtube.com/watch?v={video_id}"
-                    title = info.get('title', 'Unknown Title')
-                    duration = info.get('duration')
-                    view_count = info.get('view_count')
-                    upload_date = info.get('upload_date')
-                    
-                    if upload_date and len(upload_date) == 8:
-                        formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
-                    else:
-                        formatted_date = upload_date
-                    
-                    videos.append(ChannelVideoInfo(
-                        video_id=video_id,
-                        video_url=video_url,
-                        title=title,
-                        duration=duration,
-                        view_count=view_count,
-                        upload_date=formatted_date
-                    ))
+        # Convert to ChannelVideoInfo objects
+        videos = [
+            ChannelVideoInfo(
+                video_id=video['video_id'],
+                video_url=video['video_url'],
+                title=video['title'],
+                duration=video.get('duration'),
+                view_count=video.get('view_count'),
+                upload_date=video.get('upload_date')
+            )
+            for video in videos_data
+        ]
         
         if not videos:
             raise HTTPException(
                 status_code=404,
-                detail=f"No videos found for channel URL: {channel_url}"
+                detail=f"No full-length videos found for channel URL: {channel_url} (shorts are excluded)"
             )
         
         return ChannelResponse(
@@ -785,45 +840,30 @@ async def process_channel_videos(
     - https://www.youtube.com/user/username
     """
     try:
-        # Step 1: Get video IDs from channel
+        # Step 1: Get video IDs from channel (with pagination, excluding shorts)
         channel_url = normalize_channel_url(request.channel_url)
         max_results = request.max_results
         
-        ydl_opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "extract_flat": False,
-            "playlistend": max_results if max_results else None,
-        }
+        # Extract all videos (excluding shorts)
+        videos_data, channel_name = extract_all_channel_videos(
+            channel_url,
+            max_results=max_results,
+            exclude_shorts=True
+        )
         
-        videos_info = []
-        channel_name = None
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(channel_url, download=False)
-            channel_name = info.get('channel') or info.get('uploader') or info.get('channel_id')
-            
-            if 'entries' in info:
-                entries = info['entries']
-                if entries:
-                    for entry in entries:
-                        if entry is None:
-                            continue
-                        video_id = entry.get('id')
-                        if not video_id:
-                            continue
-                        video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
-                        title = entry.get('title', 'Unknown Title')
-                        videos_info.append({
-                            'video_id': video_id,
-                            'video_url': video_url,
-                            'title': title
-                        })
+        videos_info = [
+            {
+                'video_id': video['video_id'],
+                'video_url': video['video_url'],
+                'title': video['title']
+            }
+            for video in videos_data
+        ]
         
         if not videos_info:
             raise HTTPException(
                 status_code=404,
-                detail=f"No videos found for channel URL: {channel_url}"
+                detail=f"No full-length videos found for channel URL: {channel_url} (shorts are excluded)"
             )
         
         # Step 2: Transcribe all videos
@@ -1093,4 +1133,33 @@ async def delete_user(username: str, user: str = Depends(authenticate_api_reques
         raise HTTPException(
             status_code=500,
             detail=f"Failed to delete user: {str(e)}"
+        )
+
+
+# Settings Management Endpoints
+class SettingRequest(BaseModel):
+    """Request model for updating a setting."""
+    value: str
+
+
+@app.get("/api/admin/settings/{setting_key}")
+async def get_setting_endpoint(setting_key: str, user: str = Depends(authenticate_api_request)):
+    """Get a setting value. Requires authentication."""
+    value = get_setting(setting_key)
+    return {"setting_key": setting_key, "value": value}
+
+
+@app.post("/api/admin/settings/{setting_key}")
+async def set_setting_endpoint(
+    setting_key: str,
+    request: SettingRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """Set a setting value. Requires authentication."""
+    if set_setting(setting_key, request.value):
+        return {"message": f"Setting '{setting_key}' updated successfully", "value": request.value}
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to update setting '{setting_key}'"
         )

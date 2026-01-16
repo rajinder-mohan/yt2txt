@@ -155,6 +155,16 @@ def init_database():
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Settings table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    id SERIAL PRIMARY KEY,
+                    setting_key VARCHAR(255) NOT NULL UNIQUE,
+                    setting_value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             cursor.close()
         else:  # SQLite
             conn.execute("""
@@ -184,6 +194,16 @@ def init_database():
                     username TEXT NOT NULL UNIQUE,
                     password_hash TEXT NOT NULL,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Settings table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS settings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    setting_key TEXT NOT NULL UNIQUE,
+                    setting_value TEXT,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
         
@@ -317,3 +337,39 @@ def get_stats():
             "failed": failed['count'] if failed else 0,
             "processing": processing['count'] if processing else 0
         }
+
+
+def get_setting(setting_key: str) -> Optional[str]:
+    """Get a setting value by key."""
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            result = fetch_one(conn, "SELECT setting_value FROM settings WHERE setting_key = %s", (setting_key,))
+        else:  # SQLite
+            result = fetch_one(conn, "SELECT setting_value FROM settings WHERE setting_key = ?", (setting_key,))
+        
+        return result['setting_value'] if result and result.get('setting_value') else None
+
+
+def set_setting(setting_key: str, setting_value: str) -> bool:
+    """Set a setting value by key."""
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO settings (setting_key, setting_value, updated_at)
+                    VALUES (%s, %s, %s)
+                    ON CONFLICT (setting_key) DO UPDATE 
+                    SET setting_value = EXCLUDED.setting_value,
+                        updated_at = EXCLUDED.updated_at
+                """, (setting_key, setting_value, datetime.now()))
+                cursor.close()
+            else:  # SQLite
+                conn.execute("""
+                    INSERT OR REPLACE INTO settings (setting_key, setting_value, updated_at)
+                    VALUES (?, ?, ?)
+                """, (setting_key, setting_value, datetime.now()))
+        return True
+    except Exception as e:
+        print(f"Error setting setting: {e}")
+        return False

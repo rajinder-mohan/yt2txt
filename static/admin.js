@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
     document.getElementById('createUserBtn').addEventListener('click', handleCreateUser);
     document.getElementById('refreshUsersBtn').addEventListener('click', loadUsers);
+    document.getElementById('saveWebhookBtn').addEventListener('click', handleSaveWebhook);
+    document.getElementById('testWebhookBtn').addEventListener('click', handleTestWebhook);
     
     // Tab switching
     document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -219,7 +221,72 @@ async function handleChannelSubmit() {
         return;
     }
     
-    // Disable button and show loading
+    // Check if webhook is enabled
+    try {
+        const settingsResponse = await fetch('/api/admin/settings/use_webhook', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        let useWebhook = false;
+        let webhookUrl = null;
+        
+        if (settingsResponse.ok) {
+            const settingsData = await settingsResponse.json();
+            useWebhook = settingsData.value === 'true';
+            
+            if (useWebhook) {
+                const webhookResponse = await fetch('/api/admin/settings/n8n_webhook_url', {
+                    headers: { 'Authorization': `Bearer ${authToken}` }
+                });
+                if (webhookResponse.ok) {
+                    const webhookData = await webhookResponse.json();
+                    webhookUrl = webhookData.value;
+                }
+            }
+        }
+        
+        // If webhook is enabled and URL exists, send to webhook
+        if (useWebhook && webhookUrl) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Sending to webhook...';
+            statusDiv.className = 'channel-status info';
+            statusDiv.textContent = 'Sending channel URL to n8n webhook...';
+            
+            try {
+                const webhookResponse = await fetch(webhookUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        channel_url: channelUrl,
+                        max_results: maxVideos ? parseInt(maxVideos) : null
+                    })
+                });
+                
+                if (webhookResponse.ok) {
+                    statusDiv.className = 'channel-status success';
+                    statusDiv.textContent = 'Channel URL sent to n8n webhook successfully!';
+                    
+                    // Clear form
+                    document.getElementById('channelUrlInput').value = '';
+                    document.getElementById('maxVideosInput').value = '';
+                } else {
+                    statusDiv.className = 'channel-status error';
+                    statusDiv.textContent = `Webhook returned error: ${webhookResponse.status}`;
+                }
+            } catch (error) {
+                statusDiv.className = 'channel-status error';
+                statusDiv.textContent = 'Failed to send to webhook: ' + error.message;
+            } finally {
+                submitBtn.disabled = false;
+                submitBtn.textContent = 'Submit Channel';
+            }
+            return;
+        }
+    } catch (error) {
+        console.error('Error checking webhook settings:', error);
+    }
+    
+    // Default: Process directly
     submitBtn.disabled = true;
     submitBtn.textContent = 'Processing...';
     statusDiv.className = 'channel-status info';
@@ -291,6 +358,8 @@ function switchTab(tabName) {
         loadUsers();
     } else if (tabName === 'videos') {
         loadData();
+    } else if (tabName === 'settings') {
+        loadSettings();
     }
 }
 
@@ -410,6 +479,130 @@ async function deleteUser(username) {
         }
     } catch (error) {
         alert('Connection error. Please try again.');
+    }
+}
+
+async function loadSettings() {
+    try {
+        const response = await fetch('/api/admin/settings/n8n_webhook_url', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            document.getElementById('n8nWebhookUrlInput').value = data.value || '';
+        } else if (response.status === 404) {
+            // Setting doesn't exist yet, that's fine
+            document.getElementById('n8nWebhookUrlInput').value = '';
+        } else if (response.status === 401) {
+            handleLogout();
+        }
+        
+        // Load webhook enabled setting
+        const enabledResponse = await fetch('/api/admin/settings/use_webhook', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (enabledResponse.ok) {
+            const enabledData = await enabledResponse.json();
+            document.getElementById('useWebhookCheckbox').checked = enabledData.value === 'true';
+        }
+    } catch (error) {
+        console.error('Error loading settings:', error);
+    }
+}
+
+async function handleSaveWebhook() {
+    const webhookUrl = document.getElementById('n8nWebhookUrlInput').value.trim();
+    const useWebhook = document.getElementById('useWebhookCheckbox').checked;
+    const statusDiv = document.getElementById('webhookStatus');
+    const saveBtn = document.getElementById('saveWebhookBtn');
+    
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    
+    try {
+        // Save webhook URL
+        if (webhookUrl) {
+            const urlResponse = await fetch('/api/admin/settings/n8n_webhook_url', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({ value: webhookUrl })
+            });
+            
+            if (!urlResponse.ok) {
+                throw new Error('Failed to save webhook URL');
+            }
+        }
+        
+        // Save use webhook setting
+        const enabledResponse = await fetch('/api/admin/settings/use_webhook', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ value: useWebhook ? 'true' : 'false' })
+        });
+        
+        if (!enabledResponse.ok) {
+            throw new Error('Failed to save webhook setting');
+        }
+        
+        statusDiv.className = 'channel-status success';
+        statusDiv.textContent = 'Settings saved successfully!';
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Failed to save settings: ' + error.message;
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Webhook URL';
+    }
+}
+
+async function handleTestWebhook() {
+    const webhookUrl = document.getElementById('n8nWebhookUrlInput').value.trim();
+    const statusDiv = document.getElementById('webhookStatus');
+    const testBtn = document.getElementById('testWebhookBtn');
+    
+    if (!webhookUrl) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Please enter a webhook URL first';
+        return;
+    }
+    
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Testing webhook connection...';
+    
+    try {
+        const response = await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                test: true,
+                message: 'Test webhook from YouTube Transcription Service',
+                timestamp: new Date().toISOString()
+            })
+        });
+        
+        if (response.ok) {
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = 'Webhook test successful! Webhook is reachable.';
+        } else {
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = `Webhook returned status ${response.status}. Check your n8n workflow.`;
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Webhook test failed: ' + error.message;
+    } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test Webhook';
     }
 }
 
