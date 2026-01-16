@@ -31,11 +31,22 @@ def verify_password(password: str, password_hash: str) -> bool:
 def authenticate_user(username: str, password: str) -> bool:
     """Authenticate user credentials."""
     with get_db_connection() as conn:
-        cursor = conn.execute(
-            "SELECT password_hash FROM admin_users WHERE username = ?",
-            (username,)
-        )
-        row = cursor.fetchone()
+        if DB_TYPE == "postgres":
+            from psycopg2.extras import RealDictCursor
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            cursor.execute(
+                "SELECT password_hash FROM admin_users WHERE username = %s",
+                (username,)
+            )
+            row = cursor.fetchone()
+            cursor.close()
+        else:  # SQLite
+            cursor = conn.execute(
+                "SELECT password_hash FROM admin_users WHERE username = ?",
+                (username,)
+            )
+            row = cursor.fetchone()
+        
         if row:
             return verify_password(password, row['password_hash'])
         return False
