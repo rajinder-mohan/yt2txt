@@ -511,29 +511,39 @@ async function deleteUser(username) {
 }
 
 async function loadSettings() {
+    const webhookUrlInput = document.getElementById('n8nWebhookUrlInput');
+    const useWebhookCheckbox = document.getElementById('useWebhookCheckbox');
+    
+    // If settings elements don't exist, skip loading
+    if (!webhookUrlInput && !useWebhookCheckbox) {
+        return;
+    }
+    
     try {
         const response = await fetch('/api/admin/settings/n8n_webhook_url', {
             headers: { 'Authorization': `Bearer ${authToken}` }
         });
         
-        if (response.ok) {
+        if (response.ok && webhookUrlInput) {
             const data = await response.json();
-            document.getElementById('n8nWebhookUrlInput').value = data.value || '';
-        } else if (response.status === 404) {
+            webhookUrlInput.value = data.value || '';
+        } else if (response.status === 404 && webhookUrlInput) {
             // Setting doesn't exist yet, that's fine
-            document.getElementById('n8nWebhookUrlInput').value = '';
+            webhookUrlInput.value = '';
         } else if (response.status === 401) {
             handleLogout();
         }
         
         // Load webhook enabled setting
-        const enabledResponse = await fetch('/api/admin/settings/use_webhook', {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
-        
-        if (enabledResponse.ok) {
-            const enabledData = await enabledResponse.json();
-            document.getElementById('useWebhookCheckbox').checked = enabledData.value === 'true';
+        if (useWebhookCheckbox) {
+            const enabledResponse = await fetch('/api/admin/settings/use_webhook', {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            
+            if (enabledResponse.ok) {
+                const enabledData = await enabledResponse.json();
+                useWebhookCheckbox.checked = enabledData.value === 'true';
+            }
         }
     } catch (error) {
         console.error('Error loading settings:', error);
@@ -541,10 +551,19 @@ async function loadSettings() {
 }
 
 async function handleSaveWebhook() {
-    const webhookUrl = document.getElementById('n8nWebhookUrlInput').value.trim();
-    const useWebhook = document.getElementById('useWebhookCheckbox').checked;
+    const webhookUrlInput = document.getElementById('n8nWebhookUrlInput');
+    const useWebhookCheckbox = document.getElementById('useWebhookCheckbox');
     const statusDiv = document.getElementById('webhookStatus');
     const saveBtn = document.getElementById('saveWebhookBtn');
+    
+    // If elements don't exist, return early
+    if (!webhookUrlInput || !useWebhookCheckbox || !statusDiv || !saveBtn) {
+        console.warn('Settings elements not found');
+        return;
+    }
+    
+    const webhookUrl = webhookUrlInput.value.trim();
+    const useWebhook = useWebhookCheckbox.checked;
     
     saveBtn.disabled = true;
     saveBtn.textContent = 'Saving...';
@@ -592,9 +611,17 @@ async function handleSaveWebhook() {
 }
 
 async function handleTestWebhook() {
-    const webhookUrl = document.getElementById('n8nWebhookUrlInput').value.trim();
+    const webhookUrlInput = document.getElementById('n8nWebhookUrlInput');
     const statusDiv = document.getElementById('webhookStatus');
     const testBtn = document.getElementById('testWebhookBtn');
+    
+    // If elements don't exist, return early
+    if (!webhookUrlInput || !statusDiv || !testBtn) {
+        console.warn('Settings elements not found');
+        return;
+    }
+    
+    const webhookUrl = webhookUrlInput.value.trim();
     
     if (!webhookUrl) {
         statusDiv.className = 'channel-status error';
