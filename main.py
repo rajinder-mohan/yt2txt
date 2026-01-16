@@ -964,3 +964,121 @@ async def admin_dashboard():
 async def health():
     """Health check endpoint."""
     return {"status": "healthy"}
+
+
+# TEMPORARY ENDPOINTS FOR USER MANAGEMENT - REMOVE AFTER SETUP
+class CreateUserRequest(BaseModel):
+    """Request model for creating a user (TEMPORARY - remove after setup)."""
+    username: str
+    password: str
+
+
+class UserInfo(BaseModel):
+    """User information model."""
+    username: str
+    created_at: Optional[str] = None
+
+
+@app.post("/api/temp/create-user")
+async def create_user_temp(request: CreateUserRequest):
+    """
+    TEMPORARY ENDPOINT - Create a new admin user.
+    
+    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
+    
+    This endpoint allows creating users without authentication.
+    Use it to create your admin user, then remove this endpoint.
+    """
+    from auth import hash_password
+    from database import get_db_connection, DB_TYPE
+    
+    try:
+        password_hash = hash_password(request.password)
+        
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("""
+                        INSERT INTO admin_users (username, password_hash)
+                        VALUES (%s, %s)
+                        ON CONFLICT (username) DO UPDATE 
+                        SET password_hash = EXCLUDED.password_hash
+                    """, (request.username, password_hash))
+                    cursor.close()
+                except Exception as e:
+                    cursor.close()
+                    raise e
+            else:  # SQLite
+                conn.execute("""
+                    INSERT OR REPLACE INTO admin_users (username, password_hash)
+                    VALUES (?, ?)
+                """, (request.username, password_hash))
+        
+        return {
+            "message": f"User '{request.username}' created/updated successfully",
+            "username": request.username
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create user: {str(e)}"
+        )
+
+
+@app.get("/api/temp/list-users")
+async def list_users_temp():
+    """
+    TEMPORARY ENDPOINT - List all users.
+    
+    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
+    
+    This endpoint lists all users without authentication.
+    Use it to check if users exist, then remove this endpoint.
+    """
+    from database import get_db_connection, DB_TYPE
+    
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                from psycopg2.extras import RealDictCursor
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
+                rows = cursor.fetchall()
+                cursor.close()
+                users = [{"username": row['username'], "created_at": str(row.get('created_at', ''))} for row in rows]
+            else:  # SQLite
+                cursor = conn.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
+                rows = cursor.fetchall()
+                users = [{"username": row['username'], "created_at": row['created_at']} for row in rows]
+        
+        return {
+            "total_users": len(users),
+            "users": users
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list users: {str(e)}"
+        )
+
+
+@app.post("/api/temp/check-user")
+async def check_user_temp(request: LoginRequest):
+    """
+    TEMPORARY ENDPOINT - Check if user credentials are correct.
+    
+    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
+    
+    This endpoint checks if username/password is correct without creating a session.
+    Use it to debug login issues, then remove this endpoint.
+    """
+    from auth import authenticate_user
+    
+    is_valid = authenticate_user(request.username, request.password)
+    
+    return {
+        "username": request.username,
+        "credentials_valid": is_valid,
+        "message": "Credentials are valid" if is_valid else "Invalid username or password"
+    }
