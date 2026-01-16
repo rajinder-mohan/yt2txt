@@ -19,16 +19,31 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
     document.getElementById('createUserBtn').addEventListener('click', handleCreateUser);
     document.getElementById('refreshUsersBtn').addEventListener('click', loadUsers);
-    document.getElementById('saveWebhookBtn').addEventListener('click', handleSaveWebhook);
-    document.getElementById('testWebhookBtn').addEventListener('click', handleTestWebhook);
     
-    // Tab switching
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', () => {
-            const tabName = btn.getAttribute('data-tab');
-            switchTab(tabName);
+    // Tab switching - attach listeners
+    const tabButtons = document.querySelectorAll('.tab-btn');
+    if (tabButtons.length > 0) {
+        tabButtons.forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                const tabName = btn.getAttribute('data-tab');
+                if (tabName) {
+                    switchTab(tabName);
+                }
+            });
         });
-    });
+    }
+    
+    // Settings tab elements (optional - only if they exist)
+    const saveWebhookBtn = document.getElementById('saveWebhookBtn');
+    const testWebhookBtn = document.getElementById('testWebhookBtn');
+    if (saveWebhookBtn) {
+        saveWebhookBtn.addEventListener('click', handleSaveWebhook);
+    }
+    if (testWebhookBtn) {
+        testWebhookBtn.addEventListener('click', handleTestWebhook);
+    }
     
     // Modal
     document.querySelector('.close').addEventListener('click', () => {
@@ -335,31 +350,44 @@ async function handleChannelSubmit() {
 }
 
 function switchTab(tabName) {
-    // Update tab buttons
-    document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-        if (btn.getAttribute('data-tab') === tabName) {
-            btn.classList.add('active');
+    try {
+        // Update tab buttons
+        document.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.classList.remove('active');
+            if (btn.getAttribute('data-tab') === tabName) {
+                btn.classList.add('active');
+            }
+        });
+        
+        // Update tab content
+        document.querySelectorAll('.tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+        
+        // Show the selected tab content
+        const activeTab = document.getElementById(tabName + 'Tab');
+        if (activeTab) {
+            activeTab.classList.add('active');
+        } else {
+            console.warn('Tab content not found:', tabName + 'Tab');
         }
-    });
-    
-    // Update tab content
-    document.querySelectorAll('.tab-content').forEach(content => {
-        content.classList.remove('active');
-    });
-    
-    const activeTab = document.getElementById(tabName + 'Tab');
-    if (activeTab) {
-        activeTab.classList.add('active');
-    }
-    
-    // Load data for specific tabs
-    if (tabName === 'users') {
-        loadUsers();
-    } else if (tabName === 'videos') {
-        loadData();
-    } else if (tabName === 'settings') {
-        loadSettings();
+        
+        // Load data for specific tabs
+        if (tabName === 'users') {
+            loadUsers();
+        } else if (tabName === 'videos') {
+            loadData();
+        } else if (tabName === 'settings') {
+            // Only load settings if the tab exists
+            const settingsTab = document.getElementById('settingsTab');
+            if (settingsTab) {
+                loadSettings();
+            }
+        } else if (tabName === 'channel') {
+            // Channel tab doesn't need to load data
+        }
+    } catch (error) {
+        console.error('Error switching tab:', error);
     }
 }
 
