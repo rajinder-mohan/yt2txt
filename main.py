@@ -324,7 +324,24 @@ def download_audio(video_id: str, output_dir: str) -> tuple[str, dict]:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             # First extract info to get metadata
-            info = ydl.extract_info(url, download=False)
+            # This can raise exceptions for rate limits or bot detection
+            try:
+                info = ydl.extract_info(url, download=False)
+            except Exception as e:
+                error_msg = str(e)
+                # Check for rate limit or bot detection errors
+                if ("Sign in to confirm you're not a bot" in error_msg or
+                    "rate-limit" in error_msg.lower() or
+                    "rate limit" in error_msg.lower() or
+                    "rate-limited" in error_msg.lower() or
+                    "429" in error_msg or
+                    "too many requests" in error_msg.lower() or
+                    "session has been rate-limited" in error_msg.lower() or
+                    "premieres in" in error_msg.lower()):
+                    # Re-raise as a special exception that will be caught and break the loop
+                    raise Exception(f"RATE_LIMIT_ERROR: {error_msg}")
+                # Re-raise other errors
+                raise
             
             # Extract ALL available metadata from yt-dlp
             # Store everything we can get, not just common fields
@@ -403,7 +420,24 @@ def download_audio(video_id: str, output_dir: str) -> tuple[str, dict]:
                 formatted_date = upload_date
             
             # Now download the audio
-            ydl.download([url])
+            # This can also raise exceptions for rate limits
+            try:
+                ydl.download([url])
+            except Exception as e:
+                error_msg = str(e)
+                # Check for rate limit or bot detection errors
+                if ("Sign in to confirm you're not a bot" in error_msg or
+                    "rate-limit" in error_msg.lower() or
+                    "rate limit" in error_msg.lower() or
+                    "rate-limited" in error_msg.lower() or
+                    "429" in error_msg or
+                    "too many requests" in error_msg.lower() or
+                    "session has been rate-limited" in error_msg.lower() or
+                    "premieres in" in error_msg.lower()):
+                    # Re-raise as a special exception that will be caught and break the loop
+                    raise Exception(f"RATE_LIMIT_ERROR: {error_msg}")
+                # Re-raise other errors
+                raise
         
         # Find the downloaded file
         audio_file = None
@@ -617,14 +651,17 @@ async def transcribe_videos(request: VideoRequest):
             error_msg = str(e)
             
             # Check if this is a rate limiting error
+            # Also check for our special RATE_LIMIT_ERROR prefix
             is_rate_limit = (
+                "RATE_LIMIT_ERROR:" in error_msg or
                 "Sign in to confirm you're not a bot" in error_msg or
                 "rate-limit" in error_msg.lower() or
                 "rate limit" in error_msg.lower() or
                 "rate-limited" in error_msg.lower() or
                 "429" in error_msg or
                 "too many requests" in error_msg.lower() or
-                "session has been rate-limited" in error_msg.lower()
+                "session has been rate-limited" in error_msg.lower() or
+                "premieres in" in error_msg.lower()  # Also catch "Premieres in X hours" errors
             )
             
             if is_rate_limit:
@@ -1418,13 +1455,17 @@ async def process_channel_videos(
                 error_msg = str(e)
                 
                 # Check if this is a rate limiting error
+                # Also check for our special RATE_LIMIT_ERROR prefix
                 is_rate_limit = (
+                    "RATE_LIMIT_ERROR:" in error_msg or
                     "Sign in to confirm you're not a bot" in error_msg or
                     "rate-limit" in error_msg.lower() or
                     "rate limit" in error_msg.lower() or
                     "rate-limited" in error_msg.lower() or
                     "429" in error_msg or
-                    "too many requests" in error_msg.lower()
+                    "too many requests" in error_msg.lower() or
+                    "session has been rate-limited" in error_msg.lower() or
+                    "premieres in" in error_msg.lower()  # Also catch "Premieres in X hours" errors
                 )
                 
                 if is_rate_limit:
