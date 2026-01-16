@@ -966,11 +966,16 @@ async def health():
     return {"status": "healthy"}
 
 
-# TEMPORARY ENDPOINTS FOR USER MANAGEMENT - REMOVE AFTER SETUP
+# User Management Endpoints
 class CreateUserRequest(BaseModel):
-    """Request model for creating a user (TEMPORARY - remove after setup)."""
+    """Request model for creating a user."""
+    username: str = Field(..., min_length=3, description="Username (minimum 3 characters)")
+    password: str = Field(..., min_length=6, description="Password (minimum 6 characters)")
+
+
+class DeleteUserRequest(BaseModel):
+    """Request model for deleting a user."""
     username: str
-    password: str
 
 
 class UserInfo(BaseModel):
@@ -979,16 +984,36 @@ class UserInfo(BaseModel):
     created_at: Optional[str] = None
 
 
-@app.post("/api/temp/create-user")
-async def create_user_temp(request: CreateUserRequest):
-    """
-    TEMPORARY ENDPOINT - Create a new admin user.
+@app.get("/api/admin/users", response_model=List[UserInfo])
+async def list_users(user: str = Depends(authenticate_api_request)):
+    """List all admin users. Requires authentication."""
+    from database import get_db_connection, DB_TYPE
     
-    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
-    
-    This endpoint allows creating users without authentication.
-    Use it to create your admin user, then remove this endpoint.
-    """
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                from psycopg2.extras import RealDictCursor
+                cursor = conn.cursor(cursor_factory=RealDictCursor)
+                cursor.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
+                rows = cursor.fetchall()
+                cursor.close()
+                users = [{"username": row['username'], "created_at": str(row.get('created_at', ''))} for row in rows]
+            else:  # SQLite
+                cursor = conn.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
+                rows = cursor.fetchall()
+                users = [{"username": row['username'], "created_at": row['created_at']} for row in rows]
+        
+        return users
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list users: {str(e)}"
+        )
+
+
+@app.post("/api/admin/users", response_model=UserInfo)
+async def create_user(request: CreateUserRequest, user: str = Depends(authenticate_api_request)):
+    """Create a new admin user. Requires authentication."""
     from auth import hash_password
     from database import get_db_connection, DB_TYPE
     
@@ -1016,69 +1041,56 @@ async def create_user_temp(request: CreateUserRequest):
                 """, (request.username, password_hash))
         
         return {
-            "message": f"User '{request.username}' created/updated successfully",
-            "username": request.username
+            "username": request.username,
+            "created_at": None
         }
     except Exception as e:
+        error_msg = str(e)
+        if "UNIQUE constraint" in error_msg or "duplicate key" in error_msg.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=f"Username '{request.username}' already exists"
+            )
         raise HTTPException(
             status_code=500,
             detail=f"Failed to create user: {str(e)}"
         )
 
 
-@app.get("/api/temp/list-users")
-async def list_users_temp():
-    """
-    TEMPORARY ENDPOINT - List all users.
-    
-    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
-    
-    This endpoint lists all users without authentication.
-    Use it to check if users exist, then remove this endpoint.
-    """
+@app.delete("/api/admin/users/{username}")
+async def delete_user(username: str, user: str = Depends(authenticate_api_request)):
+    """Delete an admin user. Requires authentication. Cannot delete yourself."""
     from database import get_db_connection, DB_TYPE
+    
+    # Prevent deleting yourself
+    if user != "api_user" and username == user:
+        raise HTTPException(
+            status_code=400,
+            detail="You cannot delete your own account"
+        )
     
     try:
         with get_db_connection() as conn:
             if DB_TYPE == "postgres":
-                from psycopg2.extras import RealDictCursor
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                cursor.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
-                rows = cursor.fetchall()
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM admin_users WHERE username = %s", (username,))
+                deleted_count = cursor.rowcount
                 cursor.close()
-                users = [{"username": row['username'], "created_at": str(row.get('created_at', ''))} for row in rows]
             else:  # SQLite
-                cursor = conn.execute("SELECT username, created_at FROM admin_users ORDER BY created_at")
-                rows = cursor.fetchall()
-                users = [{"username": row['username'], "created_at": row['created_at']} for row in rows]
+                cursor = conn.execute("DELETE FROM admin_users WHERE username = ?", (username,))
+                deleted_count = cursor.rowcount
         
-        return {
-            "total_users": len(users),
-            "users": users
-        }
+        if deleted_count == 0:
+            raise HTTPException(
+                status_code=404,
+                detail=f"User '{username}' not found"
+            )
+        
+        return {"message": f"User '{username}' deleted successfully"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list users: {str(e)}"
+            detail=f"Failed to delete user: {str(e)}"
         )
-
-
-@app.post("/api/temp/check-user")
-async def check_user_temp(request: LoginRequest):
-    """
-    TEMPORARY ENDPOINT - Check if user credentials are correct.
-    
-    ⚠️ REMOVE THIS ENDPOINT AFTER SETUP FOR SECURITY!
-    
-    This endpoint checks if username/password is correct without creating a session.
-    Use it to debug login issues, then remove this endpoint.
-    """
-    from auth import authenticate_user
-    
-    is_valid = authenticate_user(request.username, request.password)
-    
-    return {
-        "username": request.username,
-        "credentials_valid": is_valid,
-        "message": "Credentials are valid" if is_valid else "Invalid username or password"
-    }

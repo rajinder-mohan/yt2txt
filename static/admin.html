@@ -55,47 +55,99 @@
             </div>
         </div>
 
-        <div class="channel-submit-section">
-            <h2>Process YouTube Channel</h2>
-            <div class="channel-form">
-                <input type="text" id="channelUrlInput" placeholder="Enter YouTube channel URL (e.g., https://www.youtube.com/@channelname)" style="flex: 1; padding: 10px; margin-right: 10px;">
-                <input type="number" id="maxVideosInput" placeholder="Max videos (optional)" style="width: 150px; padding: 10px; margin-right: 10px;">
-                <button id="submitChannelBtn" class="btn-primary">Submit Channel</button>
+        <div class="tabs-container">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="videos">Videos</button>
+                <button class="tab-btn" data-tab="channel">Process Channel</button>
+                <button class="tab-btn" data-tab="users">User Management</button>
             </div>
-            <div id="channelStatus" class="channel-status"></div>
         </div>
 
-        <div class="controls">
-            <input type="text" id="searchInput" placeholder="Search by video ID or URL...">
-            <select id="statusFilter">
-                <option value="">All Status</option>
-                <option value="success">Success</option>
-                <option value="failed">Failed</option>
-                <option value="processing">Processing</option>
-            </select>
-            <button id="refreshBtn" class="btn-primary">Refresh</button>
+        <!-- Videos Tab -->
+        <div id="videosTab" class="tab-content active">
+            <div class="controls">
+                <input type="text" id="searchInput" placeholder="Search by video ID or URL...">
+                <select id="statusFilter">
+                    <option value="">All Status</option>
+                    <option value="success">Success</option>
+                    <option value="failed">Failed</option>
+                    <option value="processing">Processing</option>
+                </select>
+                <button id="refreshBtn" class="btn-primary">Refresh</button>
+            </div>
+
+            <div class="table-container">
+                <table id="videosTable">
+                    <thead>
+                        <tr>
+                            <th>Video ID</th>
+                            <th>URL</th>
+                            <th>Status</th>
+                            <th>Transcript Preview</th>
+                            <th>Error</th>
+                            <th>Created</th>
+                            <th>Updated</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="videosTableBody">
+                        <tr>
+                            <td colspan="8" class="loading">Loading...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
-        <div class="table-container">
-            <table id="videosTable">
-                <thead>
-                    <tr>
-                        <th>Video ID</th>
-                        <th>URL</th>
-                        <th>Status</th>
-                        <th>Transcript Preview</th>
-                        <th>Error</th>
-                        <th>Created</th>
-                        <th>Updated</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="videosTableBody">
-                    <tr>
-                        <td colspan="8" class="loading">Loading...</td>
-                    </tr>
-                </tbody>
-            </table>
+        <!-- Channel Tab -->
+        <div id="channelTab" class="tab-content">
+            <div class="channel-submit-section">
+                <h2>Process YouTube Channel</h2>
+                <div class="channel-form">
+                    <input type="text" id="channelUrlInput" placeholder="Enter YouTube channel URL (e.g., https://www.youtube.com/@channelname)" style="flex: 1; padding: 10px; margin-right: 10px;">
+                    <input type="number" id="maxVideosInput" placeholder="Max videos (optional)" style="width: 150px; padding: 10px; margin-right: 10px;">
+                    <button id="submitChannelBtn" class="btn-primary">Submit Channel</button>
+                </div>
+                <div id="channelStatus" class="channel-status"></div>
+            </div>
+        </div>
+
+        <!-- Users Tab -->
+        <div id="usersTab" class="tab-content">
+            <div class="user-management-section">
+                <h2>User Management</h2>
+                
+                <div class="user-form-section">
+                    <h3>Create New User</h3>
+                    <div class="user-form">
+                        <input type="text" id="newUsernameInput" placeholder="Username (min 3 characters)" style="flex: 1; padding: 10px; margin-right: 10px;">
+                        <input type="password" id="newPasswordInput" placeholder="Password (min 6 characters)" style="flex: 1; padding: 10px; margin-right: 10px;">
+                        <button id="createUserBtn" class="btn-primary">Create User</button>
+                    </div>
+                    <div id="userFormStatus" class="channel-status"></div>
+                </div>
+
+                <div class="users-list-section">
+                    <h3>Existing Users</h3>
+                    <button id="refreshUsersBtn" class="btn-secondary" style="margin-bottom: 10px;">Refresh Users</button>
+                    <div class="table-container">
+                        <table id="usersTable">
+                            <thead>
+                                <tr>
+                                    <th>Username</th>
+                                    <th>Created At</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usersTableBody">
+                                <tr>
+                                    <td colspan="3" class="loading">Loading...</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 

@@ -187,24 +187,6 @@ def init_database():
                 )
             """)
         
-        # Create default admin user from environment variables or defaults
-        default_username = os.getenv("ADMIN_USERNAME", "admin")
-        default_password = os.getenv("ADMIN_PASSWORD", "admin")
-        default_password_hash = hashlib.sha256(default_password.encode()).hexdigest()
-        
-        if DB_TYPE == "postgres":
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO admin_users (username, password_hash)
-                VALUES (%s, %s)
-                ON CONFLICT (username) DO NOTHING
-            """, (default_username, default_password_hash))
-            cursor.close()
-        else:  # SQLite
-            conn.execute("""
-                INSERT OR IGNORE INTO admin_users (username, password_hash)
-                VALUES (?, ?)
-            """, (default_username, default_password_hash))
 
 
 def get_video_record(video_id: str) -> Optional[Dict]:

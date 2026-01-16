@@ -17,6 +17,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('searchInput').addEventListener('input', filterVideos);
     document.getElementById('statusFilter').addEventListener('change', filterVideos);
     document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
+    document.getElementById('createUserBtn').addEventListener('click', handleCreateUser);
+    document.getElementById('refreshUsersBtn').addEventListener('click', loadUsers);
+    
+    // Tab switching
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const tabName = btn.getAttribute('data-tab');
+            switchTab(tabName);
+        });
+    });
     
     // Modal
     document.querySelector('.close').addEventListener('click', () => {
@@ -257,10 +267,160 @@ async function handleChannelSubmit() {
     }
 }
 
+function switchTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        if (btn.getAttribute('data-tab') === tabName) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Update tab content
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+    });
+    
+    const activeTab = document.getElementById(tabName + 'Tab');
+    if (activeTab) {
+        activeTab.classList.add('active');
+    }
+    
+    // Load data for specific tabs
+    if (tabName === 'users') {
+        loadUsers();
+    } else if (tabName === 'videos') {
+        loadData();
+    }
+}
+
+async function loadUsers() {
+    try {
+        const response = await fetch('/api/admin/users', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+            const users = await response.json();
+            displayUsers(users);
+        } else if (response.status === 401) {
+            handleLogout();
+        }
+    } catch (error) {
+        console.error('Error loading users:', error);
+    }
+}
+
+function displayUsers(users) {
+    const tbody = document.getElementById('usersTableBody');
+    
+    if (users.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="3" class="loading">No users found</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = users.map(user => `
+        <tr>
+            <td>${escapeHtml(user.username)}</td>
+            <td>${user.created_at ? formatDate(user.created_at) : '-'}</td>
+            <td>
+                ${user.username === currentUsername 
+                    ? '<span style="color: #666;">Cannot delete yourself</span>' 
+                    : `<button onclick="deleteUser('${escapeHtml(user.username)}')" class="btn-secondary" style="background: #dc3545;">Delete</button>`}
+            </td>
+        </tr>
+    `).join('');
+}
+
+async function handleCreateUser() {
+    const username = document.getElementById('newUsernameInput').value.trim();
+    const password = document.getElementById('newPasswordInput').value;
+    const statusDiv = document.getElementById('userFormStatus');
+    const createBtn = document.getElementById('createUserBtn');
+    
+    if (!username || username.length < 3) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Username must be at least 3 characters';
+        return;
+    }
+    
+    if (!password || password.length < 6) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Password must be at least 6 characters';
+        return;
+    }
+    
+    createBtn.disabled = true;
+    createBtn.textContent = 'Creating...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Creating user...';
+    
+    try {
+        const response = await fetch('/api/admin/users', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ username, password })
+        });
+        
+        if (response.ok) {
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = `User '${username}' created successfully!`;
+            
+            // Clear form
+            document.getElementById('newUsernameInput').value = '';
+            document.getElementById('newPasswordInput').value = '';
+            
+            // Refresh users list
+            loadUsers();
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Failed to create user';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Connection error. Please try again.';
+    } finally {
+        createBtn.disabled = false;
+        createBtn.textContent = 'Create User';
+    }
+}
+
+async function deleteUser(username) {
+    if (!confirm(`Are you sure you want to delete user '${username}'?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/api/admin/users/${encodeURIComponent(username)}`, {
+            method: 'DELETE',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        
+        if (response.ok) {
+            loadUsers();
+        } else {
+            const error = await response.json();
+            alert(error.detail || 'Failed to delete user');
+        }
+    } catch (error) {
+        alert('Connection error. Please try again.');
+    }
+}
+
 // Auto-refresh every 30 seconds
 setInterval(() => {
     if (authToken) {
-        loadData();
+        // Only refresh if videos tab is active
+        const videosTab = document.getElementById('videosTab');
+        if (videosTab && videosTab.classList.contains('active')) {
+            loadData();
+        }
     }
 }, 30000);
 
