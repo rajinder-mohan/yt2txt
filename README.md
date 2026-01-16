@@ -330,6 +330,19 @@ ADMIN_PASSWORD=admin
 - `POSTGRES_USER`: PostgreSQL username (default: `postgres`)
 - `POSTGRES_PASSWORD`: PostgreSQL password (default: `postgres`)
 
+**Email Configuration (Optional - for sending results):**
+- `SMTP_HOST`: SMTP server host (default: `smtp.gmail.com`)
+- `SMTP_PORT`: SMTP server port (default: `587`)
+- `SMTP_USER`: SMTP username/email
+- `SMTP_PASSWORD`: SMTP password (use app password for Gmail)
+- `SMTP_FROM_EMAIL`: From email address (defaults to `SMTP_USER`)
+- `SMTP_USE_TLS`: Use TLS encryption (default: `true`)
+
+**API Key Configuration (Optional - for API authentication):**
+- `API_KEY`: API key for programmatic access (optional, but recommended for n8n integration)
+  - If set, you can use `X-API-Key` header instead of Bearer token
+  - If not set, only Bearer token authentication is available
+
 **Note:** 
 - The `.env` file is automatically loaded when the application starts
 - For Docker, the `.env` file is automatically loaded via `docker-compose.yml`
@@ -337,6 +350,7 @@ ADMIN_PASSWORD=admin
 - **Important**: Change the default admin password in production!
 - The default admin user is created automatically on first run using these credentials
 - The database type is determined by `DB_TYPE` environment variable
+- Email functionality is optional - if not configured, the service will work but won't send emails
 
 ## Notes
 

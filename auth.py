@@ -1,11 +1,18 @@
 import hashlib
 import secrets
+import os
 from typing import Optional
-from fastapi import HTTPException, Depends
+from fastapi import HTTPException, Depends, Header
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from database import get_db_connection
+from database import get_db_connection, DB_TYPE
+from dotenv import load_dotenv
 
-security = HTTPBearer()
+load_dotenv()
+
+security = HTTPBearer(auto_error=False)
+
+# API Key from environment variable
+API_KEY = os.getenv("API_KEY", "")
 
 # Simple session storage (in production, use Redis or database)
 active_sessions = {}
@@ -52,6 +59,29 @@ def delete_session(token: str):
         del active_sessions[token]
 
 
+def update_user_password(username: str, new_password: str) -> bool:
+    """Update user password in database."""
+    try:
+        new_password_hash = hash_password(new_password)
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                cursor.execute(
+                    "UPDATE admin_users SET password_hash = %s WHERE username = %s",
+                    (new_password_hash, username)
+                )
+                cursor.close()
+            else:  # SQLite
+                conn.execute(
+                    "UPDATE admin_users SET password_hash = ? WHERE username = ?",
+                    (new_password_hash, username)
+                )
+        return True
+    except Exception as e:
+        print(f"Error updating password: {e}")
+        return False
+
+
 async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)) -> str:
     """Dependency to get current authenticated user."""
     token = credentials.credentials
@@ -59,4 +89,51 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if not username:
         raise HTTPException(status_code=401, detail="Invalid or expired session")
     return username
+
+
+async def get_api_key_header(x_api_key: Optional[str] = Header(None)) -> Optional[str]:
+    """Get API key from X-API-Key header."""
+    return x_api_key
+
+
+async def authenticate_api_request(
+    x_api_key: Optional[str] = Header(None, alias="X-API-Key"),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)
+) -> str:
+    """
+    Flexible authentication: Accepts either Bearer token OR API key.
+    
+    Priority:
+    1. X-API-Key header (API key auth) - checked first
+    2. Bearer token (session-based auth) - checked if no API key
+    
+    Returns username or 'api_user' for API key authentication.
+    """
+    # Try API key first (easier to check)
+    if x_api_key:
+        if API_KEY and x_api_key == API_KEY:
+            return "api_user"
+        else:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid API key"
+            )
+    
+    # Try Bearer token if no API key provided
+    if credentials:
+        token = credentials.credentials
+        username = get_user_from_token(token)
+        if username:
+            return username
+        else:
+            raise HTTPException(
+                status_code=401,
+                detail="Invalid or expired session token"
+            )
+    
+    # No valid authentication found
+    raise HTTPException(
+        status_code=401,
+        detail="Authentication required. Provide either Bearer token (Authorization: Bearer <token>) or X-API-Key header"
+    )
 

@@ -55,6 +55,16 @@
             </div>
         </div>
 
+        <div class="channel-submit-section">
+            <h2>Process YouTube Channel</h2>
+            <div class="channel-form">
+                <input type="text" id="channelUrlInput" placeholder="Enter YouTube channel URL (e.g., https://www.youtube.com/@channelname)" style="flex: 1; padding: 10px; margin-right: 10px;">
+                <input type="number" id="maxVideosInput" placeholder="Max videos (optional)" style="width: 150px; padding: 10px; margin-right: 10px;">
+                <button id="submitChannelBtn" class="btn-primary">Submit Channel</button>
+            </div>
+            <div id="channelStatus" class="channel-status"></div>
+        </div>
+
         <div class="controls">
             <input type="text" id="searchInput" placeholder="Search by video ID or URL...">
             <select id="statusFilter">

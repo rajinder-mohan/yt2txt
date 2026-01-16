@@ -16,6 +16,7 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('refreshBtn').addEventListener('click', loadData);
     document.getElementById('searchInput').addEventListener('input', filterVideos);
     document.getElementById('statusFilter').addEventListener('change', filterVideos);
+    document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
     
     // Modal
     document.querySelector('.close').addEventListener('click', () => {
@@ -194,6 +195,66 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+async function handleChannelSubmit() {
+    const channelUrl = document.getElementById('channelUrlInput').value.trim();
+    const maxVideos = document.getElementById('maxVideosInput').value;
+    const statusDiv = document.getElementById('channelStatus');
+    const submitBtn = document.getElementById('submitChannelBtn');
+    
+    if (!channelUrl) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Please enter a channel URL';
+        return;
+    }
+    
+    // Disable button and show loading
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Processing...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Submitting channel URL...';
+    
+    try {
+        const requestBody = {
+            channel_url: channelUrl,
+            max_results: maxVideos ? parseInt(maxVideos) : null
+        };
+        
+        const response = await fetch('/api/channel/process', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = `Success! Found ${data.total_videos} videos. Processing started. ${data.message || ''}`;
+            
+            // Clear form
+            document.getElementById('channelUrlInput').value = '';
+            document.getElementById('maxVideosInput').value = '';
+            
+            // Refresh data after a delay
+            setTimeout(() => {
+                loadData();
+            }, 2000);
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Failed to process channel';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Connection error. Please try again.';
+    } finally {
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Submit Channel';
+    }
 }
 
 // Auto-refresh every 30 seconds

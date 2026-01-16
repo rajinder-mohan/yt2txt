@@ -20,7 +20,8 @@ from database import (
     get_all_videos,
     get_stats
 )
-from auth import authenticate_user, create_session, delete_session, get_current_user
+from auth import authenticate_user, create_session, delete_session, get_current_user, authenticate_api_request, update_user_password, active_sessions
+from email_service import send_channel_processing_results
 
 # Load environment variables from .env file
 load_dotenv()
@@ -435,6 +436,208 @@ async def get_video_status(video_id: str):
     }
 
 
+class ChannelRequest(BaseModel):
+    """Request model for getting video IDs from a YouTube channel."""
+    channel_url: str = Field(
+        ...,
+        description="YouTube channel URL. Examples: 'https://www.youtube.com/@channelname', 'https://www.youtube.com/channel/CHANNEL_ID', 'https://www.youtube.com/c/channelname', 'https://www.youtube.com/user/username'",
+        example="https://www.youtube.com/@channelname"
+    )
+    max_results: Optional[int] = Field(
+        None,
+        description="Maximum number of videos to return (optional, returns all if not specified)",
+        example=50
+    )
+
+
+class ChannelVideoInfo(BaseModel):
+    """Information about a video from a channel."""
+    video_id: str
+    video_url: str
+    title: str
+    duration: Optional[int] = None
+    view_count: Optional[int] = None
+    upload_date: Optional[str] = None
+
+
+class ChannelResponse(BaseModel):
+    """Response model for channel video IDs."""
+    channel_url: str
+    channel_name: Optional[str] = None
+    total_videos: int
+    videos: List[ChannelVideoInfo]
+
+
+def normalize_channel_url(channel_url: str) -> str:
+    """
+    Normalize channel URL to ensure we get the videos page.
+    If the URL is a channel URL without /videos, append it.
+    """
+    channel_url = channel_url.strip()
+    
+    # If it's already a videos page, return as is
+    if '/videos' in channel_url or '/streams' in channel_url or '/shorts' in channel_url:
+        return channel_url
+    
+    # If it's a channel URL, append /videos to get all videos
+    if '@' in channel_url or '/channel/' in channel_url or '/c/' in channel_url or '/user/' in channel_url:
+        # Remove trailing slash if present
+        if channel_url.endswith('/'):
+            channel_url = channel_url[:-1]
+        # Append /videos if not already there
+        if not channel_url.endswith('/videos'):
+            channel_url = f"{channel_url}/videos"
+    
+    return channel_url
+
+
+@app.post("/channel/videos", response_model=ChannelResponse)
+async def get_channel_videos(request: ChannelRequest):
+    """
+    Get video IDs from a YouTube channel URL using yt-dlp.
+    
+    Supports various YouTube channel URL formats:
+    - https://www.youtube.com/@channelname
+    - https://www.youtube.com/channel/CHANNEL_ID
+    - https://www.youtube.com/c/channelname
+    - https://www.youtube.com/user/username
+    - https://www.youtube.com/@channelname/videos
+    
+    Returns a list of video IDs with their titles, URLs, and metadata.
+    """
+    try:
+        channel_url = normalize_channel_url(request.channel_url)
+        max_results = request.max_results
+        
+        # Configure yt-dlp to extract video information without downloading
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,  # Get full video info
+            "playlistend": max_results if max_results else None,
+        }
+        
+        videos = []
+        channel_name = None
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            # Extract channel information
+            info = ydl.extract_info(channel_url, download=False)
+            
+            # Get channel name
+            channel_name = info.get('channel') or info.get('uploader') or info.get('channel_id')
+            
+            # Check if it's a playlist/channel with entries
+            if 'entries' in info:
+                # It's a channel or playlist
+                entries = info['entries']
+                if entries:
+                    for entry in entries:
+                        if entry is None:
+                            continue
+                        
+                        video_id = entry.get('id')
+                        if not video_id:
+                            continue
+                        
+                        video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+                        title = entry.get('title', 'Unknown Title')
+                        duration = entry.get('duration')
+                        view_count = entry.get('view_count')
+                        upload_date = entry.get('upload_date')
+                        
+                        # Format upload date if available
+                        if upload_date and len(upload_date) == 8:
+                            # Format YYYYMMDD to YYYY-MM-DD
+                            formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                        else:
+                            formatted_date = upload_date
+                        
+                        videos.append(ChannelVideoInfo(
+                            video_id=video_id,
+                            video_url=video_url,
+                            title=title,
+                            duration=duration,
+                            view_count=view_count,
+                            upload_date=formatted_date
+                        ))
+            else:
+                # Single video (shouldn't happen with channel URL, but handle it)
+                video_id = info.get('id')
+                if video_id:
+                    video_url = info.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+                    title = info.get('title', 'Unknown Title')
+                    duration = info.get('duration')
+                    view_count = info.get('view_count')
+                    upload_date = info.get('upload_date')
+                    
+                    if upload_date and len(upload_date) == 8:
+                        formatted_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:8]}"
+                    else:
+                        formatted_date = upload_date
+                    
+                    videos.append(ChannelVideoInfo(
+                        video_id=video_id,
+                        video_url=video_url,
+                        title=title,
+                        duration=duration,
+                        view_count=view_count,
+                        upload_date=formatted_date
+                    ))
+        
+        if not videos:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No videos found for channel URL: {channel_url}"
+            )
+        
+        return ChannelResponse(
+            channel_url=channel_url,
+            channel_name=channel_name,
+            total_videos=len(videos),
+            videos=videos
+        )
+        
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        if "Private video" in error_msg or "Video unavailable" in error_msg:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Channel or videos not accessible: {error_msg}"
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to extract videos from channel: {error_msg}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing channel URL: {str(e)}"
+        )
+
+
+@app.get("/channel/videos")
+async def get_channel_videos_get(channel_url: str, max_results: Optional[int] = None):
+    """
+    Get video IDs from a YouTube channel URL using yt-dlp (GET endpoint).
+    
+    Query parameters:
+    - channel_url: YouTube channel URL (required)
+    - max_results: Maximum number of videos to return (optional)
+    
+    Supports various YouTube channel URL formats:
+    - https://www.youtube.com/@channelname
+    - https://www.youtube.com/channel/CHANNEL_ID
+    - https://www.youtube.com/c/channelname
+    - https://www.youtube.com/user/username
+    - https://www.youtube.com/@channelname/videos
+    
+    The endpoint automatically appends /videos to channel URLs if not present.
+    """
+    request = ChannelRequest(channel_url=channel_url, max_results=max_results)
+    return await get_channel_videos(request)
+
+
 # Authentication endpoints
 class LoginRequest(BaseModel):
     username: str
@@ -466,17 +669,288 @@ async def logout(request: LogoutRequest):
     return {"message": "Logged out successfully"}
 
 
+class ChangePasswordRequest(BaseModel):
+    """Request model for changing password."""
+    current_password: str
+    new_password: str
+    username: Optional[str] = Field(None, description="Username (required if using API key, optional if using Bearer token)")
+
+
+@app.post("/api/change-password")
+async def change_password(
+    request: ChangePasswordRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    Change password for the authenticated user.
+    
+    Requires authentication (Bearer token or API key).
+    - If using Bearer token: username is determined from token
+    - If using API key: username must be provided in request body
+    
+    User must provide current password for verification.
+    """
+    # Determine which username to update
+    if user == "api_user":
+        # API key authentication - require username in request
+        if not request.username:
+            raise HTTPException(
+                status_code=400,
+                detail="Username is required when using API key authentication"
+            )
+        target_username = request.username
+    else:
+        # Bearer token authentication - use authenticated user
+        target_username = user
+    
+    # Verify current password
+    if not authenticate_user(target_username, request.current_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Current password is incorrect"
+        )
+    
+    # Validate new password
+    if len(request.new_password) < 6:
+        raise HTTPException(
+            status_code=400,
+            detail="New password must be at least 6 characters long"
+        )
+    
+    # Update password
+    if update_user_password(target_username, request.new_password):
+        # Invalidate all sessions for this user (force re-login)
+        tokens_to_delete = [token for token, username in active_sessions.items() if username == target_username]
+        for token in tokens_to_delete:
+            delete_session(token)
+        
+        return {"message": f"Password changed successfully for user '{target_username}'. Please login again."}
+    else:
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to update password"
+        )
+
+
 # Admin dashboard endpoints
 @app.get("/api/admin/videos")
-async def get_all_videos_endpoint(user: str = Depends(get_current_user)):
-    """Get all videos with their status."""
+async def get_all_videos_endpoint(user: str = Depends(authenticate_api_request)):
+    """Get all videos with their status. Supports Bearer token or API key authentication."""
     return get_all_videos()
 
 
 @app.get("/api/admin/stats")
-async def get_stats_endpoint(user: str = Depends(get_current_user)):
-    """Get statistics about videos."""
+async def get_stats_endpoint(user: str = Depends(authenticate_api_request)):
+    """Get statistics about videos. Supports Bearer token or API key authentication."""
     return get_stats()
+
+
+# n8n Integration Endpoint for Channel Processing
+class ChannelProcessRequest(BaseModel):
+    """Request model for processing a YouTube channel (for n8n integration)."""
+    channel_url: str = Field(..., description="YouTube channel URL")
+    max_results: Optional[int] = Field(None, description="Maximum number of videos to process")
+    deepgram_api_key: Optional[str] = Field(None, description="Deepgram API key (optional if set via env var)")
+
+
+class ChannelProcessResponse(BaseModel):
+    """Response model for channel processing."""
+    channel_url: str
+    channel_name: Optional[str] = None
+    total_videos: int
+    processed_videos: int
+    success_count: int
+    failed_count: int
+    message: str
+    video_results: List[dict]
+
+
+@app.post("/api/channel/process", response_model=ChannelProcessResponse)
+async def process_channel_videos(
+    request: ChannelProcessRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    Process a YouTube channel: Get video IDs, transcribe all videos, and save to DB.
+    
+    This endpoint is designed for n8n workflow integration:
+    1. Gets video IDs from channel URL
+    2. Transcribes all videos using existing /transcribe logic
+    3. Saves results to database
+    
+    Supports various YouTube channel URL formats:
+    - https://www.youtube.com/@channelname
+    - https://www.youtube.com/channel/CHANNEL_ID
+    - https://www.youtube.com/c/channelname
+    - https://www.youtube.com/user/username
+    """
+    try:
+        # Step 1: Get video IDs from channel
+        channel_url = normalize_channel_url(request.channel_url)
+        max_results = request.max_results
+        
+        ydl_opts = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": False,
+            "playlistend": max_results if max_results else None,
+        }
+        
+        videos_info = []
+        channel_name = None
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(channel_url, download=False)
+            channel_name = info.get('channel') or info.get('uploader') or info.get('channel_id')
+            
+            if 'entries' in info:
+                entries = info['entries']
+                if entries:
+                    for entry in entries:
+                        if entry is None:
+                            continue
+                        video_id = entry.get('id')
+                        if not video_id:
+                            continue
+                        video_url = entry.get('url') or f"https://www.youtube.com/watch?v={video_id}"
+                        title = entry.get('title', 'Unknown Title')
+                        videos_info.append({
+                            'video_id': video_id,
+                            'video_url': video_url,
+                            'title': title
+                        })
+        
+        if not videos_info:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No videos found for channel URL: {channel_url}"
+            )
+        
+        # Step 2: Transcribe all videos
+        api_key = request.deepgram_api_key or os.getenv("DEEPGRAM_API_KEY")
+        if not api_key:
+            raise HTTPException(
+                status_code=400,
+                detail="Deepgram API key is required. Provide it in the request or set DEEPGRAM_API_KEY environment variable."
+            )
+        
+        # Create video request for transcription
+        video_list = [(v['video_id'], v['video_url']) for v in videos_info]
+        temp_dir = tempfile.mkdtemp(prefix="youtube_audio_")
+        
+        success_count = 0
+        failed_count = 0
+        video_results = []
+        
+        for video_id, video_url in video_list:
+            audio_file_path = None
+            transcript = None
+            error_msg = None
+            status = "failed"
+            
+            try:
+                # Check database for existing record
+                db_record = get_video_record(video_id)
+                
+                if db_record and db_record['status'] == 'success' and db_record['transcript']:
+                    # Use cached transcript
+                    transcript = db_record['transcript']
+                    status = "success"
+                    success_count += 1
+                elif db_record and db_record['status'] == 'failed':
+                    # Skip failed videos
+                    error_msg = db_record.get('error_message', 'Previous attempt failed')
+                    failed_count += 1
+                else:
+                    # Process video
+                    if not db_record:
+                        create_video_record(video_id, video_url, "processing")
+                    
+                    # Download audio
+                    if db_record and db_record.get('audio_file_path') and os.path.exists(db_record['audio_file_path']):
+                        audio_file_path = db_record['audio_file_path']
+                    else:
+                        audio_file_path = download_audio(video_id, temp_dir)
+                        update_video_record(video_id, audio_file_path=audio_file_path)
+                    
+                    # Transcribe
+                    transcript = transcribe_audio(audio_file_path, api_key)
+                    update_video_record(video_id, status="success", transcript=transcript)
+                    
+                    # Delete audio file
+                    if audio_file_path and os.path.exists(audio_file_path):
+                        try:
+                            os.remove(audio_file_path)
+                            delete_audio_file_path(video_id)
+                        except Exception as e:
+                            print(f"Warning: Could not delete audio file {audio_file_path}: {e}")
+                    
+                    status = "success"
+                    success_count += 1
+                
+            except Exception as e:
+                error_msg = str(e)
+                status = "failed"
+                failed_count += 1
+                
+                # Update database with failure
+                db_record = get_video_record(video_id)
+                if db_record and db_record['status'] != 'failed':
+                    update_video_record(video_id, status="failed", error_message=error_msg)
+                elif not db_record:
+                    create_video_record(video_id, video_url, "failed")
+                    update_video_record(video_id, error_message=error_msg)
+            
+            # Find video title
+            video_title = next((v['title'] for v in videos_info if v['video_id'] == video_id), 'Unknown Title')
+            
+            video_results.append({
+                'video_id': video_id,
+                'video_url': video_url,
+                'title': video_title,
+                'status': status,
+                'transcript': transcript if status == 'success' else None,
+                'error': error_msg if status == 'failed' else None
+            })
+        
+        # Clean up temp directory
+        try:
+            if os.path.exists(temp_dir) and not os.listdir(temp_dir):
+                shutil.rmtree(temp_dir)
+        except Exception as e:
+            print(f"Warning: Could not clean up temp directory: {e}")
+        
+        message = f"Processed {len(videos_info)} videos. {success_count} successful, {failed_count} failed."
+        
+        return ChannelProcessResponse(
+            channel_url=channel_url,
+            channel_name=channel_name,
+            total_videos=len(videos_info),
+            processed_videos=len(video_results),
+            success_count=success_count,
+            failed_count=failed_count,
+            message=message,
+            video_results=video_results
+        )
+        
+    except yt_dlp.utils.DownloadError as e:
+        error_msg = str(e)
+        if "Private video" in error_msg or "Video unavailable" in error_msg:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Channel or videos not accessible: {error_msg}"
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to extract videos from channel: {error_msg}"
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Error processing channel: {str(e)}"
+        )
 
 
 # Admin dashboard GUI
