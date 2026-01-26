@@ -253,10 +253,21 @@ function showLogin() {
 }
 
 function showDashboard() {
-    document.getElementById('loginScreen').classList.add('hidden');
-    document.getElementById('dashboard').classList.remove('hidden');
+    const loginScreen = document.getElementById('loginScreen');
+    const dashboard = document.getElementById('dashboard');
+    
+    if (loginScreen) {
+        loginScreen.classList.add('hidden');
+    }
+    if (dashboard) {
+        dashboard.classList.remove('hidden');
+    }
+    
     if (currentUsername) {
-        document.getElementById('usernameDisplay').textContent = `Logged in as: ${currentUsername}`;
+        const usernameDisplay = document.getElementById('usernameDisplay');
+        if (usernameDisplay) {
+            usernameDisplay.textContent = `Logged in as: ${currentUsername}`;
+        }
     }
 }
 
@@ -265,6 +276,13 @@ async function handleLogin(e) {
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const errorDiv = document.getElementById('loginError');
+    const loginForm = document.getElementById('loginForm');
+    
+    // Disable form during login
+    if (loginForm) {
+        loginForm.querySelector('button[type="submit"]').disabled = true;
+    }
+    errorDiv.textContent = '';
     
     try {
         const response = await fetch('/api/login', {
@@ -279,15 +297,36 @@ async function handleLogin(e) {
             currentUsername = data.username;
             localStorage.setItem('authToken', authToken);
             localStorage.setItem('username', currentUsername);
+            
+            // Show dashboard first
             showDashboard();
-            loadData();
+            
+            // Update URL to root (remove any query params)
+            if (window.location.pathname !== '/' || window.location.search) {
+                window.history.replaceState({}, '', '/');
+            }
+            
+            // Load data in background (don't block dashboard display)
+            try {
+                await loadData();
+            } catch (loadError) {
+                console.error('Error loading initial data:', loadError);
+                // Dashboard is already shown, just log the error
+            }
+            
             errorDiv.textContent = '';
         } else {
             const error = await response.json();
             errorDiv.textContent = error.detail || 'Login failed';
         }
     } catch (error) {
+        console.error('Login error:', error);
         errorDiv.textContent = 'Connection error. Please try again.';
+    } finally {
+        // Re-enable form
+        if (loginForm) {
+            loginForm.querySelector('button[type="submit"]').disabled = false;
+        }
     }
 }
 
@@ -870,7 +909,7 @@ async function loadSettings() {
     } catch (error) {
         console.error('Error loading settings:', error);
     }
-    
+}
 
 async function handleSaveWebhook() {
     const webhookUrlInput = document.getElementById('n8nWebhookUrlInput');
