@@ -1,6 +1,43 @@
 let authToken = localStorage.getItem('authToken');
 let currentUsername = localStorage.getItem('username');
 
+// Confirm modal state
+let confirmModalResolve = null;
+
+// Show confirm modal (replaces confirm())
+function showConfirmModal(title, message) {
+    return new Promise((resolve) => {
+        document.getElementById('confirmModalTitle').textContent = title;
+        document.getElementById('confirmModalMessage').textContent = message;
+        const modal = document.getElementById('confirmModal');
+        modal.classList.remove('hidden');
+        confirmModalResolve = resolve;
+    });
+}
+
+// Close confirm modal
+function closeConfirmModal() {
+    const modal = document.getElementById('confirmModal');
+    modal.classList.add('hidden');
+    if (confirmModalResolve) {
+        confirmModalResolve(false);
+        confirmModalResolve = null;
+    }
+}
+
+// Show toast notification (replaces alert for success/info)
+function showToast(message, type = 'info') {
+    const toast = document.getElementById('toast');
+    const toastMessage = document.getElementById('toastMessage');
+    toastMessage.textContent = message;
+    toast.className = `toast ${type}`;
+    toast.classList.remove('hidden');
+    
+    setTimeout(() => {
+        toast.classList.add('hidden');
+    }, 3000);
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     if (authToken) {
@@ -9,6 +46,25 @@ document.addEventListener('DOMContentLoaded', () => {
     } else {
         showLogin();
     }
+    
+    // Confirm modal event listeners
+    document.getElementById('confirmModalOk').addEventListener('click', () => {
+        const modal = document.getElementById('confirmModal');
+        modal.classList.add('hidden');
+        if (confirmModalResolve) {
+            confirmModalResolve(true);
+            confirmModalResolve = null;
+        }
+    });
+    
+    document.getElementById('confirmModalCancel').addEventListener('click', closeConfirmModal);
+    
+    // Close confirm modal when clicking outside
+    document.getElementById('confirmModal').addEventListener('click', (e) => {
+        if (e.target.id === 'confirmModal') {
+            closeConfirmModal();
+        }
+    });
     
     // Login form
     document.getElementById('loginForm').addEventListener('submit', handleLogin);
@@ -747,7 +803,8 @@ async function handleCreateUser() {
 }
 
 async function deleteUser(username) {
-    if (!confirm(`Are you sure you want to delete user '${username}'?`)) {
+    const confirmed = await showConfirmModal('Delete User', `Are you sure you want to delete user '${username}'?`);
+    if (!confirmed) {
         return;
     }
     
@@ -763,10 +820,10 @@ async function deleteUser(username) {
             loadUsers();
         } else {
             const error = await response.json();
-            alert(error.detail || 'Failed to delete user');
+            showToast(error.detail || 'Failed to delete user', 'error');
         }
     } catch (error) {
-        alert('Connection error. Please try again.');
+        showToast('Connection error. Please try again.', 'error');
     }
 }
 
@@ -946,7 +1003,8 @@ async function handleTestCookies() {
 }
 
 async function handleDeleteCookies() {
-    if (!confirm('Are you sure you want to delete all stored cookies? This may cause YouTube bot detection errors.')) {
+    const confirmed = await showConfirmModal('Delete Cookies', 'Are you sure you want to delete all stored cookies? This may cause YouTube bot detection errors.');
+    if (!confirmed) {
         return;
     }
     
@@ -1497,7 +1555,7 @@ function handleClearAI() {
 async function handleBulkGetData() {
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
-        alert('Please select at least one video');
+        showToast('Please select at least one video', 'info');
         return;
     }
     
@@ -1513,20 +1571,21 @@ async function handleBulkGetData() {
         
         const data = await response.json();
         console.log('Bulk data results:', data);
-        alert(`Retrieved data for ${data.results.length} video(s). Check console for details.`);
+        showToast(`Retrieved data for ${data.results.length} video(s)`, 'success');
     } catch (error) {
-        alert('Error getting data: ' + error.message);
+        showToast('Error getting data: ' + error.message, 'error');
     }
 }
 
 async function handleBulkTranscribe() {
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
-        alert('Please select at least one video');
+        showToast('Please select at least one video', 'info');
         return;
     }
     
-    if (!confirm(`Transcribe ${videoIds.length} video(s)? This may take a while.`)) {
+    const confirmed = await showConfirmModal('Transcribe Videos', `Transcribe ${videoIds.length} video(s)? This may take a while.`);
+    if (!confirmed) {
         return;
     }
     
@@ -1541,18 +1600,16 @@ async function handleBulkTranscribe() {
         });
         
         const data = await response.json();
-        const successCount = data.results.filter(r => r.success).length;
-        alert(`Transcription complete: ${successCount}/${data.total} successful`);
         loadData(); // Refresh
     } catch (error) {
-        alert('Error transcribing videos: ' + error.message);
+        showToast('Error transcribing videos: ' + error.message, 'error');
     }
 }
 
 async function handleBulkGenerateContent() {
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
-        alert('Please select at least one video');
+        showToast('Please select at least one video', 'info');
         return;
     }
     
@@ -1561,7 +1618,7 @@ async function handleBulkGenerateContent() {
     const customPrompt = prompt('Enter custom prompt (if not using saved prompt):');
     
     if (!promptId && !customPrompt) {
-        alert('Please provide either a prompt ID or custom prompt');
+        showToast('Please provide either a prompt ID or custom prompt', 'info');
         return;
     }
     
@@ -1581,9 +1638,9 @@ async function handleBulkGenerateContent() {
         
         const data = await response.json();
         console.log('Bulk content generation results:', data);
-        alert(`Generated content for ${data.results.length} video(s). Check console for details.`);
+        showToast(`Generated content for ${data.results.length} video(s)`, 'success');
     } catch (error) {
-        alert('Error generating content: ' + error.message);
+        showToast('Error generating content: ' + error.message, 'error');
     }
 }
 
@@ -1688,7 +1745,7 @@ async function handleSavePrompt(e) {
     const userTemplate = document.getElementById('promptUserTemplate').value.trim();
     
     if (!name) {
-        alert('Name is required');
+        showToast('Name is required', 'info');
         return;
     }
     
@@ -1714,18 +1771,19 @@ async function handleSavePrompt(e) {
         if (response.ok) {
             hidePromptForm();
             loadPrompts();
-            alert('Prompt saved successfully');
+            showToast('Prompt saved successfully', 'success');
         } else {
             const error = await response.json();
-            alert('Error saving prompt: ' + (error.detail || 'Unknown error'));
+            showToast('Error saving prompt: ' + (error.detail || 'Unknown error'), 'error');
         }
     } catch (error) {
-        alert('Error saving prompt: ' + error.message);
+        showToast('Error saving prompt: ' + error.message, 'error');
     }
 }
 
 async function deletePrompt(promptId) {
-    if (!confirm('Are you sure you want to delete this prompt?')) {
+    const confirmed = await showConfirmModal('Delete Prompt', 'Are you sure you want to delete this prompt?');
+    if (!confirmed) {
         return;
     }
     
@@ -1737,12 +1795,11 @@ async function deletePrompt(promptId) {
         
         if (response.ok) {
             loadPrompts();
-            alert('Prompt deleted successfully');
         } else {
-            alert('Error deleting prompt');
+            showToast('Error deleting prompt', 'error');
         }
     } catch (error) {
-        alert('Error deleting prompt: ' + error.message);
+        showToast('Error deleting prompt: ' + error.message, 'error');
     }
 }
 
@@ -1763,11 +1820,11 @@ async function showGeneratedContent(videoId, videoTitle) {
         } else if (response.status === 401) {
             handleLogout();
         } else {
-            alert('Error loading generated content');
+            showToast('Error loading generated content', 'error');
         }
     } catch (error) {
         console.error('Error loading generated content:', error);
-        alert('Error loading generated content: ' + error.message);
+        showToast('Error loading generated content: ' + error.message, 'error');
     }
 }
 
@@ -1821,7 +1878,8 @@ function closeGeneratedContentModal() {
 }
 
 async function deleteGeneratedContent(contentId, videoId) {
-    if (!confirm('Are you sure you want to delete this generated content?')) {
+    const confirmed = await showConfirmModal('Delete Generated Content', 'Are you sure you want to delete this generated content?');
+    if (!confirmed) {
         return;
     }
     
@@ -1836,11 +1894,11 @@ async function deleteGeneratedContent(contentId, videoId) {
             const videoTitle = document.getElementById('gcVideoTitle').textContent;
             showGeneratedContent(videoId, videoTitle);
         } else {
-            alert('Error deleting generated content');
+            showToast('Error deleting generated content', 'error');
         }
     } catch (error) {
         console.error('Error deleting generated content:', error);
-        alert('Error deleting generated content: ' + error.message);
+        showToast('Error deleting generated content: ' + error.message, 'error');
     }
 }
 
@@ -1862,28 +1920,28 @@ async function toggleIgnoreVideo(videoId, ignored) {
         
         if (response.ok) {
             const result = await response.json();
-            alert(result.message);
             loadData(); // Reload videos
         } else if (response.status === 401) {
             handleLogout();
         } else {
             const error = await response.json();
-            alert('Error: ' + (error.detail || 'Failed to update video'));
+            showToast('Error: ' + (error.detail || 'Failed to update video'), 'error');
         }
     } catch (error) {
         console.error('Error toggling ignore status:', error);
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
 async function handleBulkIgnore() {
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
-        alert('Please select videos to ignore');
+        showToast('Please select videos to ignore', 'info');
         return;
     }
     
-    if (!confirm(`Ignore ${videoIds.length} video(s)?`)) {
+    const confirmed = await showConfirmModal('Ignore Videos', `Ignore ${videoIds.length} video(s)?`);
+    if (!confirmed) {
         return;
     }
     
@@ -1902,29 +1960,29 @@ async function handleBulkIgnore() {
         
         if (response.ok) {
             const result = await response.json();
-            alert(result.message);
             selectedVideoIds.clear();
             loadData();
         } else if (response.status === 401) {
             handleLogout();
         } else {
             const error = await response.json();
-            alert('Error: ' + (error.detail || 'Failed to ignore videos'));
+            showToast('Error: ' + (error.detail || 'Failed to ignore videos'), 'error');
         }
     } catch (error) {
         console.error('Error ignoring videos:', error);
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
 async function handleBulkUnignore() {
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
-        alert('Please select videos to unignore');
+        showToast('Please select videos to unignore', 'info');
         return;
     }
     
-    if (!confirm(`Unignore ${videoIds.length} video(s)?`)) {
+    const confirmed = await showConfirmModal('Unignore Videos', `Unignore ${videoIds.length} video(s)?`);
+    if (!confirmed) {
         return;
     }
     
@@ -1943,18 +2001,17 @@ async function handleBulkUnignore() {
         
         if (response.ok) {
             const result = await response.json();
-            alert(result.message);
             selectedVideoIds.clear();
             loadData();
         } else if (response.status === 401) {
             handleLogout();
         } else {
             const error = await response.json();
-            alert('Error: ' + (error.detail || 'Failed to unignore videos'));
+            showToast('Error: ' + (error.detail || 'Failed to unignore videos'), 'error');
         }
     } catch (error) {
         console.error('Error unignoring videos:', error);
-        alert('Error: ' + error.message);
+        showToast('Error: ' + error.message, 'error');
     }
 }
 
@@ -1981,7 +2038,7 @@ function handlePromptSelectChange(e) {
 function handleLoadPrompt() {
     const select = document.getElementById('openaiPromptSelect');
     if (!select || !select.value) {
-        alert('Please select a prompt first');
+        showToast('Please select a prompt first', 'info');
         return;
     }
     
@@ -2002,10 +2059,11 @@ function handleLoadPrompt() {
 function handleSaveCustomPrompt() {
     const customPrompt = document.getElementById('openaiPrompt').value.trim();
     if (!customPrompt) {
-        alert('Please enter a prompt first');
+        showToast('Please enter a prompt first', 'info');
         return;
     }
     
+    // Use a simple prompt for name input (can be enhanced later with modal)
     const name = prompt('Enter a name for this prompt:');
     if (!name) return;
     
