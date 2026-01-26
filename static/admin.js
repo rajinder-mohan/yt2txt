@@ -20,6 +20,10 @@ document.addEventListener('DOMContentLoaded', () => {
     if (channelFilter) {
         channelFilter.addEventListener('change', filterVideos);
     }
+    const showIgnoredCheckbox = document.getElementById('showIgnoredCheckbox');
+    if (showIgnoredCheckbox) {
+        showIgnoredCheckbox.addEventListener('change', loadData);
+    }
     document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
     document.getElementById('createUserBtn').addEventListener('click', handleCreateUser);
     document.getElementById('refreshUsersBtn').addEventListener('click', loadUsers);
@@ -113,6 +117,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const bulkGetDataBtn = document.getElementById('bulkGetDataBtn');
     const bulkTranscribeBtn = document.getElementById('bulkTranscribeBtn');
     const bulkGenerateContentBtn = document.getElementById('bulkGenerateContentBtn');
+    const bulkIgnoreBtn = document.getElementById('bulkIgnoreBtn');
+    const bulkUnignoreBtn = document.getElementById('bulkUnignoreBtn');
     const clearSelectionBtn = document.getElementById('clearSelectionBtn');
     if (selectAllVideos) {
         selectAllVideos.addEventListener('change', handleSelectAllVideos);
@@ -125,6 +131,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     if (bulkGenerateContentBtn) {
         bulkGenerateContentBtn.addEventListener('click', handleBulkGenerateContent);
+    }
+    if (bulkIgnoreBtn) {
+        bulkIgnoreBtn.addEventListener('click', handleBulkIgnore);
+    }
+    if (bulkUnignoreBtn) {
+        bulkUnignoreBtn.addEventListener('click', handleBulkUnignore);
     }
     if (clearSelectionBtn) {
         clearSelectionBtn.addEventListener('click', handleClearSelection);
@@ -248,12 +260,12 @@ function displayVideos(videos) {
     tbody.innerHTML = videos.map(video => {
         const isSelected = selectedVideoIds.has(video.video_id);
         return `
-        <tr>
+        <tr ${video.ignored ? 'style="opacity: 0.6; background-color: #f5f5f5;"' : ''}>
             <td><input type="checkbox" class="video-checkbox" data-video-id="${video.video_id}" ${isSelected ? 'checked' : ''}></td>
             <td><a href="https://www.youtube.com/watch?v=${video.video_id}" target="_blank">${video.video_id}</a></td>
-            <td>${video.title ? escapeHtml(video.title.substring(0, 60)) + (video.title.length > 60 ? '...' : '') : '-'}</td>
+            <td title="${video.title ? escapeHtml(video.title) : ''}">${video.title ? escapeHtml(video.title) : '-'}</td>
             <td>${video.channel_name ? escapeHtml(video.channel_name) : '-'}</td>
-            <td>${video.video_url || '-'}</td>
+            <td>${video.video_url ? `<a href="${video.video_url}" target="_blank" title="${video.video_url}">${video.video_url.length > 30 ? escapeHtml(video.video_url.substring(0, 30)) + '...' : escapeHtml(video.video_url)}</a>` : '-'}</td>
             <td><span class="status-badge status-${video.status}">${video.status}</span></td>
             <td>
                 ${video.transcript 
@@ -270,8 +282,11 @@ function displayVideos(videos) {
             <td>${formatDate(video.updated_at)}</td>
             <td>
                 ${video.transcript 
-                    ? `<button onclick="showFullTranscript('${video.video_id}')" class="btn-secondary">View Full</button>`
-                    : '-'}
+                    ? `<button onclick="showFullTranscript('${video.video_id}')" class="btn-secondary" style="font-size: 0.85rem; margin-right: 0.25rem;">View Full</button>`
+                    : ''}
+                ${video.ignored 
+                    ? `<button onclick="toggleIgnoreVideo('${video.video_id}', false)" class="btn-secondary" style="font-size: 0.85rem; background: #28a745;">Unignore</button>`
+                    : `<button onclick="toggleIgnoreVideo('${video.video_id}', true)" class="btn-secondary" style="font-size: 0.85rem; background: #dc3545;">Ignore</button>`}
             </td>
         </tr>
     `;
@@ -419,12 +434,15 @@ async function loadData() {
         }
         
         // Load videos
-        const videosResponse = await fetch('/api/admin/videos', {
+        const showIgnored = document.getElementById('showIgnoredCheckbox')?.checked || false;
+        const url = `/api/videos?show_ignored=${showIgnored}`;
+        const videosResponse = await fetch(url, {
             headers: { 'Authorization': `Bearer ${authToken}` }
         });
         
         if (videosResponse.ok) {
-            allVideos = await videosResponse.json();
+            const data = await videosResponse.json();
+            allVideos = data.videos || data;
             
             // Populate channel filter with unique channel names
             const channels = [...new Set(allVideos.map(v => v.channel_name).filter(Boolean))].sort();
@@ -1833,6 +1851,112 @@ document.addEventListener('click', (e) => {
         closeGeneratedContentModal();
     }
 });
+
+// Ignore video functions
+async function toggleIgnoreVideo(videoId, ignored) {
+    try {
+        const response = await fetch(`/api/videos/${videoId}/ignore?ignored=${ignored}`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message);
+            loadData(); // Reload videos
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'Failed to update video'));
+        }
+    } catch (error) {
+        console.error('Error toggling ignore status:', error);
+        alert('Error: ' + error.message);
+    }
+}
+
+async function handleBulkIgnore() {
+    const videoIds = Array.from(selectedVideoIds);
+    if (videoIds.length === 0) {
+        alert('Please select videos to ignore');
+        return;
+    }
+    
+    if (!confirm(`Ignore ${videoIds.length} video(s)?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/videos/bulk-ignore', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                video_ids: videoIds,
+                ignored: true
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message);
+            selectedVideoIds.clear();
+            loadData();
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'Failed to ignore videos'));
+        }
+    } catch (error) {
+        console.error('Error ignoring videos:', error);
+        alert('Error: ' + error.message);
+    }
+}
+
+async function handleBulkUnignore() {
+    const videoIds = Array.from(selectedVideoIds);
+    if (videoIds.length === 0) {
+        alert('Please select videos to unignore');
+        return;
+    }
+    
+    if (!confirm(`Unignore ${videoIds.length} video(s)?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/videos/bulk-ignore', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${authToken}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                video_ids: videoIds,
+                ignored: false
+            })
+        });
+        
+        if (response.ok) {
+            const result = await response.json();
+            alert(result.message);
+            selectedVideoIds.clear();
+            loadData();
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            alert('Error: ' + (error.detail || 'Failed to unignore videos'));
+        }
+    } catch (error) {
+        console.error('Error unignoring videos:', error);
+        alert('Error: ' + error.message);
+    }
+}
 
 function handlePromptSelectChange(e) {
     const promptId = e.target.value;

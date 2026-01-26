@@ -1,7 +1,7 @@
 import os
 import hashlib
 from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from contextlib import contextmanager
 from dotenv import load_dotenv
 
@@ -142,6 +142,7 @@ def init_database():
                     channel_name TEXT,
                     channel_id TEXT,
                     metadata JSONB,
+                    ignored BOOLEAN DEFAULT FALSE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -230,6 +231,7 @@ def init_database():
                     channel_name TEXT,
                     channel_id TEXT,
                     metadata TEXT,
+                    ignored INTEGER DEFAULT 0,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
@@ -316,6 +318,7 @@ def _add_metadata_columns(conn):
         ("channel_name", "TEXT"),
         ("channel_id", "TEXT"),
         ("metadata", "JSONB" if DB_TYPE == "postgres" else "TEXT"),
+        ("ignored", "BOOLEAN" if DB_TYPE == "postgres" else "INTEGER"),
     ]
     
     for column_name, column_type in metadata_columns:
@@ -504,7 +507,7 @@ def get_all_videos():
             videos = fetch_all(conn, """
                 SELECT id, video_id, video_url, status, transcript, error_message, 
                        title, duration, view_count, upload_date, channel_name, channel_id, metadata,
-                       created_at, updated_at
+                       ignored, created_at, updated_at
                 FROM video_transcriptions
                 ORDER BY updated_at DESC
             """)
@@ -512,7 +515,7 @@ def get_all_videos():
             videos = fetch_all(conn, """
                 SELECT id, video_id, video_url, status, transcript, error_message, 
                        title, duration, view_count, upload_date, channel_name, channel_id, metadata,
-                       created_at, updated_at
+                       ignored, created_at, updated_at
                 FROM video_transcriptions
                 ORDER BY updated_at DESC
             """)
@@ -831,3 +834,64 @@ def get_all_generated_content(limit: Optional[int] = None, offset: Optional[int]
                     content['usage_info'] = None
         
         return contents
+
+
+def update_video_ignored_status(video_id: str, ignored: bool) -> bool:
+    """Update the ignored status of a video."""
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE video_transcriptions 
+                SET ignored = %s, updated_at = %s 
+                WHERE video_id = %s
+            """, (ignored, datetime.now(), video_id))
+            conn.commit()
+            success = cursor.rowcount > 0
+            cursor.close()
+            return success
+        else:  # SQLite
+            ignored_int = 1 if ignored else 0
+            cursor = conn.cursor()
+            cursor.execute("""
+                UPDATE video_transcriptions 
+                SET ignored = ?, updated_at = ? 
+                WHERE video_id = ?
+            """, (ignored_int, datetime.now(), video_id))
+            conn.commit()
+            success = cursor.rowcount > 0
+            cursor.close()
+            return success
+
+
+def bulk_update_video_ignored_status(video_ids: List[str], ignored: bool) -> int:
+    """Bulk update ignored status for multiple videos. Returns count of updated videos."""
+    if not video_ids:
+        return 0
+    
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            placeholders = ','.join(['%s'] * len(video_ids))
+            cursor.execute(f"""
+                UPDATE video_transcriptions 
+                SET ignored = %s, updated_at = %s 
+                WHERE video_id IN ({placeholders})
+            """, [ignored, datetime.now()] + video_ids)
+            conn.commit()
+            count = cursor.rowcount
+            cursor.close()
+            return count
+        else:  # SQLite
+            ignored_int = 1 if ignored else 0
+            placeholders = ','.join(['?'] * len(video_ids))
+            cursor = conn.cursor()
+            cursor.execute(f"""
+                UPDATE video_transcriptions 
+                SET ignored = ?, updated_at = ? 
+                WHERE video_id IN ({placeholders})
+            """, [ignored_int, datetime.now()] + video_ids)
+            conn.commit()
+            count = cursor.rowcount
+            cursor.close()
+            return count

@@ -33,7 +33,9 @@ from database import (
     get_generated_content_by_video,
     get_generated_content,
     delete_generated_content,
-    get_all_generated_content
+    get_all_generated_content,
+    update_video_ignored_status,
+    bulk_update_video_ignored_status
 )
 from auth import authenticate_user, create_session, delete_session, get_current_user, authenticate_api_request, update_user_password, active_sessions
 from email_service import send_channel_processing_results
@@ -1383,6 +1385,7 @@ async def get_videos_endpoint(
     date_to: Optional[str] = None,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
+    show_ignored: Optional[bool] = False,
     user: str = Depends(authenticate_api_request)
 ):
     """
@@ -1421,13 +1424,20 @@ async def get_videos_endpoint(
     from database import get_db_connection, DB_TYPE, fetch_all
     import json
     
-    # Select all fields including metadata
+    # Select all fields including metadata and ignored status
     query = """SELECT id, video_id, video_url, status, transcript, error_message, 
                       title, duration, view_count, upload_date, channel_name, channel_id, metadata,
-                      created_at, updated_at 
+                      ignored, created_at, updated_at 
                FROM video_transcriptions"""
     params = []
     conditions = []
+    
+    # Filter out ignored videos by default (unless show_ignored is True)
+    if not show_ignored:
+        if DB_TYPE == "postgres":
+            conditions.append("(ignored IS NULL OR ignored = FALSE)")
+        else:  # SQLite
+            conditions.append("(ignored IS NULL OR ignored = 0)")
     
     if status:
         if status in ['pending', 'processing', 'processed', 'failed', 'success', 'rate_limited']:
@@ -3265,3 +3275,64 @@ async def delete_generated_content_endpoint(
         return {"message": "Generated content deleted successfully"}
     else:
         raise HTTPException(status_code=500, detail="Failed to delete generated content")
+
+
+# Video Ignore Management Endpoints
+class BulkIgnoreVideoRequest(BaseModel):
+    video_ids: List[str]
+    ignored: bool
+
+
+@app.post("/api/videos/{video_id}/ignore")
+async def ignore_video_endpoint(
+    video_id: str,
+    ignored: bool = True,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Mark Video as Ignored/Active**
+    
+    Marks a video as ignored (hidden from default views) or active.
+    
+    **What it does:**
+    - Sets ignored status for a video
+    - Ignored videos are hidden by default in video listings
+    - Use show_ignored=true parameter to view ignored videos
+    
+    **Query Parameters:**
+    - `ignored`: true to ignore, false to activate (default: true)
+    
+    **Response:**
+    - Returns success message
+    - Returns 404 if video not found
+    """
+    if update_video_ignored_status(video_id, ignored):
+        status = "ignored" if ignored else "activated"
+        return {"message": f"Video {status} successfully"}
+    else:
+        raise HTTPException(status_code=404, detail="Video not found")
+
+
+@app.post("/api/videos/bulk-ignore")
+async def bulk_ignore_videos_endpoint(
+    request: BulkIgnoreVideoRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Bulk Mark Videos as Ignored/Active**
+    
+    Marks multiple videos as ignored or active in a single request.
+    
+    **Request:**
+    - `video_ids`: List of video IDs to update
+    - `ignored`: true to ignore, false to activate
+    
+    **Response:**
+    - Returns count of updated videos
+    """
+    count = bulk_update_video_ignored_status(request.video_ids, request.ignored)
+    status = "ignored" if request.ignored else "activated"
+    return {
+        "message": f"{count} video(s) {status} successfully",
+        "count": count
+    }
