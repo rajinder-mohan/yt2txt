@@ -6,14 +6,9 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy certificate files if they exist (for Bright Data or similar proxy services)
-# Create certs directory and copy certificate
-COPY certs/brightdata-33335.crt /usr/local/share/ca-certificates/brightdata-33335.crt 2>/dev/null || true
-
-# Update CA certificates (only if cert file exists)
-RUN if [ -f /usr/local/share/ca-certificates/brightdata-33335.crt ]; then \
-        update-ca-certificates; \
-    fi
+# Copy certificate file (for Bright Data or similar proxy services)
+COPY certs/brightdata-33335.crt /usr/local/share/ca-certificates/brightdata-33335.crt
+RUN update-ca-certificates
 
 # Set working directory
 WORKDIR /app
