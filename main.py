@@ -1478,14 +1478,17 @@ async def get_videos_endpoint(
     with get_db_connection() as conn:
         # Get total count
         if DB_TYPE == "postgres":
-            cursor = conn.cursor()
+            from psycopg2.extras import RealDictCursor
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
             cursor.execute(count_query, tuple(count_params) if count_params else None)
-            total_count = cursor.fetchone()['total']
+            result = cursor.fetchone()
+            total_count = result['total'] if result else 0
             cursor.close()
         else:  # SQLite
             cursor = conn.cursor()
             cursor.execute(count_query, tuple(count_params) if count_params else None)
-            total_count = cursor.fetchone()[0]
+            result = cursor.fetchone()
+            total_count = result[0] if result else 0
             cursor.close()
         
         # Get videos
