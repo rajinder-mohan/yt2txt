@@ -486,7 +486,14 @@ function updateBulkActionsVisibility() {
     const bulkActions = document.getElementById('bulkActionsVideos');
     const selectedCount = document.getElementById('selectedCountVideos');
     if (bulkActions && selectedCount) {
-        const count = selectedVideoIds.size;
+        // Get count from both Set and actual checked checkboxes
+        const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+        const countFromCheckboxes = checkedBoxes.length;
+        const countFromSet = selectedVideoIds.size;
+        
+        // Use the larger count (in case they're out of sync)
+        const count = Math.max(countFromCheckboxes, countFromSet);
+        
         if (count > 0) {
             bulkActions.style.display = 'block';
             selectedCount.textContent = count;
@@ -645,7 +652,7 @@ function initializeDataTable() {
                 searchable: false,
                 render: function(data, type, row) {
                     const isSelected = selectedVideoIds.has(row.video_id);
-                    return `<input type="checkbox" class="video-checkbox" data-video-id="${row.video_id}" ${isSelected ? 'checked' : ''} ${isProcessing ? 'disabled' : ''}>`;
+                    return `<input type="checkbox" class="video-checkbox" data-video-id="${row.video_id}" ${isSelected ? 'checked' : ''} ${isProcessing ? 'disabled' : ''} onchange="handleVideoCheckboxChange(event)">`;
                 }
             },
             {
@@ -761,11 +768,23 @@ function initializeDataTable() {
         }
     });
     
-    // Attach checkbox listeners after table is drawn
+    // Attach checkbox listeners and sync state after table is drawn
     table.addEventListener('draw.dt', function() {
+        // Sync checkbox states with selectedVideoIds Set
         document.querySelectorAll('.video-checkbox').forEach(checkbox => {
-            checkbox.addEventListener('change', handleVideoCheckboxChange);
+            const videoId = checkbox.dataset.videoId;
+            checkbox.checked = selectedVideoIds.has(videoId);
+            
+            // Remove old listeners and add new one
+            const newCheckbox = checkbox.cloneNode(true);
+            checkbox.parentNode.replaceChild(newCheckbox, checkbox);
+            newCheckbox.addEventListener('change', handleVideoCheckboxChange);
         });
+        
+        // Update select all checkbox
+        updateSelectAllCheckbox();
+        
+        // Update bulk actions visibility
         updateBulkActionsVisibility();
     });
 }
@@ -2066,7 +2085,18 @@ async function handleBulkTranscribe() {
         return;
     }
     
-    const videoIds = Array.from(selectedVideoIds);
+    // Get selected video IDs from both Set and actual checked checkboxes
+    const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+    const videoIdsFromCheckboxes = Array.from(checkedBoxes).map(cb => cb.dataset.videoId);
+    const videoIdsFromSet = Array.from(selectedVideoIds);
+    
+    // Use checkboxes as source of truth, but also sync the Set
+    const videoIds = videoIdsFromCheckboxes.length > 0 ? videoIdsFromCheckboxes : videoIdsFromSet;
+    
+    // Sync Set with checkboxes
+    selectedVideoIds.clear();
+    videoIds.forEach(id => selectedVideoIds.add(id));
+    
     if (videoIds.length === 0) {
         showToast('Please select at least one video', 'info');
         return;
@@ -2125,7 +2155,18 @@ async function handleBulkGenerateContent() {
         return;
     }
     
-    const videoIds = Array.from(selectedVideoIds);
+    // Get selected video IDs from both Set and actual checked checkboxes
+    const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+    const videoIdsFromCheckboxes = Array.from(checkedBoxes).map(cb => cb.dataset.videoId);
+    const videoIdsFromSet = Array.from(selectedVideoIds);
+    
+    // Use checkboxes as source of truth, but also sync the Set
+    const videoIds = videoIdsFromCheckboxes.length > 0 ? videoIdsFromCheckboxes : videoIdsFromSet;
+    
+    // Sync Set with checkboxes
+    selectedVideoIds.clear();
+    videoIds.forEach(id => selectedVideoIds.add(id));
+    
     if (videoIds.length === 0) {
         showToast('Please select at least one video', 'info');
         return;
@@ -2481,7 +2522,18 @@ async function handleBulkIgnore() {
         return;
     }
     
-    const videoIds = Array.from(selectedVideoIds);
+    // Get selected video IDs from both Set and actual checked checkboxes
+    const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+    const videoIdsFromCheckboxes = Array.from(checkedBoxes).map(cb => cb.dataset.videoId);
+    const videoIdsFromSet = Array.from(selectedVideoIds);
+    
+    // Use checkboxes as source of truth, but also sync the Set
+    const videoIds = videoIdsFromCheckboxes.length > 0 ? videoIdsFromCheckboxes : videoIdsFromSet;
+    
+    // Sync Set with checkboxes
+    selectedVideoIds.clear();
+    videoIds.forEach(id => selectedVideoIds.add(id));
+    
     if (videoIds.length === 0) {
         showToast('Please select videos to ignore', 'info');
         return;
@@ -2533,7 +2585,23 @@ async function handleBulkIgnore() {
 }
 
 async function handleBulkUnignore() {
-    const videoIds = Array.from(selectedVideoIds);
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
+    // Get selected video IDs from both Set and actual checked checkboxes
+    const checkedBoxes = document.querySelectorAll('.video-checkbox:checked');
+    const videoIdsFromCheckboxes = Array.from(checkedBoxes).map(cb => cb.dataset.videoId);
+    const videoIdsFromSet = Array.from(selectedVideoIds);
+    
+    // Use checkboxes as source of truth, but also sync the Set
+    const videoIds = videoIdsFromCheckboxes.length > 0 ? videoIdsFromCheckboxes : videoIdsFromSet;
+    
+    // Sync Set with checkboxes
+    selectedVideoIds.clear();
+    videoIds.forEach(id => selectedVideoIds.add(id));
+    
     if (videoIds.length === 0) {
         showToast('Please select videos to unignore', 'info');
         return;
@@ -2542,6 +2610,16 @@ async function handleBulkUnignore() {
     const confirmed = await showConfirmModal('Unignore Videos', `Unignore ${videoIds.length} video(s)?`);
     if (!confirmed) {
         return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    const btn = document.getElementById('bulkUnignoreBtn');
+    const originalText = btn ? btn.textContent : 'Unignore Selected';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
     }
     
     try {
@@ -2559,8 +2637,9 @@ async function handleBulkUnignore() {
         
         if (response.ok) {
             const result = await response.json();
+            showToast(`Unignored ${result.count || videoIds.length} video(s)`, 'success');
             selectedVideoIds.clear();
-            loadData();
+            await loadData();
         } else if (response.status === 401) {
             handleLogout();
         } else {
@@ -2570,6 +2649,13 @@ async function handleBulkUnignore() {
     } catch (error) {
         console.error('Error unignoring videos:', error);
         showToast('Error: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 }
 
