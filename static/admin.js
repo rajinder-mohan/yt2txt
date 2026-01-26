@@ -719,15 +719,30 @@ function initializeDataTable() {
                 orderable: false,
                 searchable: false,
                 render: function(data, type, row) {
-                    let html = '';
+                    let html = '<div style="display: flex; flex-direction: column; gap: 0.25rem;">';
+                    
+                    // Get Data button
+                    html += `<button onclick="handleSingleGetData('${row.video_id}')" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Get Data</button>`;
+                    
+                    // Transcribe button
+                    html += `<button onclick="handleSingleTranscribe('${row.video_id}')" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Transcribe</button>`;
+                    
+                    // Generate Content button
+                    html += `<button onclick="handleSingleGenerateContent('${row.video_id}')" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">Generate Content</button>`;
+                    
+                    // View Full Transcript button (if transcript exists)
                     if (row.transcript) {
-                        html += `<button onclick="showFullTranscript('${row.video_id}')" class="btn-secondary" style="font-size: 0.85rem; margin-right: 0.25rem;">View Full</button>`;
+                        html += `<button onclick="showFullTranscript('${row.video_id}')" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem;">View Transcript</button>`;
                     }
+                    
+                    // Ignore/Unignore button
                     if (row.ignored) {
-                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', false)" class="btn-secondary" style="font-size: 0.85rem; background: #28a745;">Unignore</button>`;
+                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', false)" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #28a745;">Unignore</button>`;
                     } else {
-                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', true)" class="btn-secondary" style="font-size: 0.85rem; background: #dc3545;">Ignore</button>`;
+                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', true)" class="btn-secondary" style="font-size: 0.75rem; padding: 0.25rem 0.5rem; background: #dc3545;">Ignore</button>`;
                     }
+                    
+                    html += '</div>';
                     return html;
                 }
             }
@@ -751,7 +766,144 @@ function initializeDataTable() {
         document.querySelectorAll('.video-checkbox').forEach(checkbox => {
             checkbox.addEventListener('change', handleVideoCheckboxChange);
         });
+        updateBulkActionsVisibility();
     });
+}
+
+// Single video action handlers
+async function handleSingleGetData(videoId) {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    try {
+        const response = await fetch('/api/bulk/get-data', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ video_ids: [videoId] })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Retrieved data for video ${videoId}`, 'success');
+            if (videosDataTable) {
+                videosDataTable.ajax.reload();
+            }
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error getting data', 'error');
+        }
+    } catch (error) {
+        showToast('Error getting data: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+    }
+}
+
+async function handleSingleTranscribe(videoId) {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
+    const confirmed = await showConfirmModal('Transcribe Video', `Transcribe video ${videoId}? This may take a while.`);
+    if (!confirmed) {
+        return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    try {
+        const response = await fetch('/api/bulk/transcribe', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ video_ids: [videoId] })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Transcription started for video ${videoId}`, 'success');
+            if (videosDataTable) {
+                videosDataTable.ajax.reload();
+            }
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error transcribing video', 'error');
+        }
+    } catch (error) {
+        showToast('Error transcribing video: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+    }
+}
+
+async function handleSingleGenerateContent(videoId) {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
+    // Show prompt selection dialog
+    const promptId = prompt('Enter prompt ID (or leave empty for custom prompt):');
+    const customPrompt = prompt('Enter custom prompt (if not using saved prompt):');
+    
+    if (!promptId && !customPrompt) {
+        showToast('Please provide either a prompt ID or custom prompt', 'info');
+        return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    try {
+        const response = await fetch('/api/bulk/generate-content', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({
+                video_ids: [videoId],
+                prompt_id: promptId ? parseInt(promptId) : null,
+                prompt: customPrompt || null
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Generated content for video ${videoId}`, 'success');
+            if (videosDataTable) {
+                videosDataTable.ajax.reload();
+            }
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error generating content', 'error');
+        }
+    } catch (error) {
+        showToast('Error generating content: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+    }
 }
 
 function formatDate(dateString) {
