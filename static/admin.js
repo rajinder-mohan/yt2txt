@@ -1,5 +1,7 @@
 let authToken = localStorage.getItem('authToken');
 let currentUsername = localStorage.getItem('username');
+let isProcessing = false;
+let videosDataTable = null;
 
 // Confirm modal state
 let confirmModalResolve = null;
@@ -38,11 +40,57 @@ function showToast(message, type = 'info') {
     }, 3000);
 }
 
+// Set processing state (disable/enable buttons)
+function setProcessingState(processing) {
+    isProcessing = processing;
+    const buttons = document.querySelectorAll('#bulkGetDataBtn, #bulkTranscribeBtn, #bulkGenerateContentBtn, #bulkIgnoreBtn, #bulkUnignoreBtn, #selectAllVideos');
+    buttons.forEach(btn => {
+        if (btn) {
+            btn.disabled = processing;
+            if (processing) {
+                btn.style.opacity = '0.6';
+                btn.style.cursor = 'not-allowed';
+            } else {
+                btn.style.opacity = '1';
+                btn.style.cursor = 'pointer';
+            }
+        }
+    });
+    
+    // Disable checkboxes
+    const checkboxes = document.querySelectorAll('.video-checkbox');
+    checkboxes.forEach(cb => {
+        if (cb) cb.disabled = processing;
+    });
+}
+
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     if (authToken) {
-        showDashboard();
-        loadData();
+        // Verify token is still valid before showing dashboard
+        try {
+            const response = await fetch('/api/admin/stats', {
+                headers: { 'Authorization': `Bearer ${authToken}` }
+            });
+            if (response.ok) {
+                showDashboard();
+                loadData();
+            } else if (response.status === 401) {
+                // Token invalid, clear and show login
+                authToken = null;
+                currentUsername = null;
+                localStorage.removeItem('authToken');
+                localStorage.removeItem('username');
+                showLogin();
+            } else {
+                showDashboard();
+                loadData();
+            }
+        } catch (error) {
+            // If check fails, still try to show dashboard (might be network issue)
+            showDashboard();
+            loadData();
+        }
     } else {
         showLogin();
     }
@@ -497,24 +545,12 @@ function showTranscript(videoId, preview) {
 }
 
 function filterVideos() {
-    const searchTerm = document.getElementById('searchInput').value.toLowerCase();
-    const statusFilter = document.getElementById('statusFilter').value;
-    const channelFilter = document.getElementById('channelFilter');
-    const channelFilterValue = channelFilter ? channelFilter.value.toLowerCase() : '';
-    
-    const filtered = allVideos.filter(video => {
-        const matchesSearch = !searchTerm || 
-            video.video_id.toLowerCase().includes(searchTerm) ||
-            (video.video_url && video.video_url.toLowerCase().includes(searchTerm)) ||
-            (video.title && video.title.toLowerCase().includes(searchTerm)) ||
-            (video.channel_name && video.channel_name.toLowerCase().includes(searchTerm));
-        const matchesStatus = !statusFilter || video.status === statusFilter;
-        const matchesChannel = !channelFilterValue || 
-            (video.channel_name && video.channel_name.toLowerCase() === channelFilterValue);
-        return matchesSearch && matchesStatus && matchesChannel;
-    });
-    
-    displayVideos(filtered);
+    // Reload DataTable with new filters
+    if (videosDataTable) {
+        videosDataTable.ajax.reload();
+    } else {
+        initializeDataTable();
+    }
 }
 
 async function loadData() {
@@ -532,36 +568,190 @@ async function loadData() {
             document.getElementById('statProcessing').textContent = stats.processing;
         }
         
-        // Load videos
-        const showIgnored = document.getElementById('showIgnoredCheckbox')?.checked || false;
-        const url = `/api/videos?show_ignored=${showIgnored}`;
-        const videosResponse = await fetch(url, {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
-        
-        if (videosResponse.ok) {
-            const data = await videosResponse.json();
-            allVideos = data.videos || data;
-            
-            // Populate channel filter with unique channel names
-            const channels = [...new Set(allVideos.map(v => v.channel_name).filter(Boolean))].sort();
-            const channelFilter = document.getElementById('channelFilter');
-            if (channelFilter) {
-                const currentValue = channelFilter.value;
-                channelFilter.innerHTML = '<option value="">All Channels</option>' + 
-                    channels.map(ch => `<option value="${escapeHtml(ch)}">${escapeHtml(ch)}</option>`).join('');
-                if (currentValue) {
-                    channelFilter.value = currentValue;
-                }
-            }
-            
-            filterVideos();
-        } else if (videosResponse.status === 401) {
-            handleLogout();
-        }
+        // Initialize or reload DataTable
+        initializeDataTable();
     } catch (error) {
         console.error('Error loading data:', error);
     }
+}
+
+function initializeDataTable() {
+    const table = document.getElementById('videosTable');
+    if (!table) return;
+    
+    // Destroy existing DataTable if it exists
+    if (videosDataTable) {
+        videosDataTable.destroy();
+        videosDataTable = null;
+    }
+    
+    // Get current filter values
+    const showIgnored = document.getElementById('showIgnoredCheckbox')?.checked || false;
+    const statusFilter = document.getElementById('statusFilter')?.value || '';
+    const channelFilter = document.getElementById('channelFilter')?.value || '';
+    const searchInput = document.getElementById('searchInput')?.value || '';
+    
+    // Initialize DataTable with server-side processing
+    videosDataTable = new DataTable('#videosTable', {
+        processing: true,
+        serverSide: true,
+        ajax: {
+            url: '/api/videos',
+            type: 'GET',
+            headers: {
+                'Authorization': `Bearer ${authToken}`
+            },
+            data: function(d) {
+                // DataTables parameters
+                d.show_ignored = showIgnored;
+                d.status = statusFilter || null;
+                d.channel = channelFilter || null;
+                d.search = searchInput || null;
+                d.limit = d.length;
+                d.offset = d.start;
+            },
+            dataSrc: function(json) {
+                // Update allVideos for checkbox handling
+                allVideos = json.videos || [];
+                
+                // Populate channel filter with unique channel names (only on first load)
+                if (!channelFilter) {
+                    const channels = [...new Set(allVideos.map(v => v.channel_name).filter(Boolean))].sort();
+                    const channelFilterEl = document.getElementById('channelFilter');
+                    if (channelFilterEl && channelFilterEl.options.length <= 1) {
+                        channels.forEach(ch => {
+                            const option = document.createElement('option');
+                            option.value = ch;
+                            option.textContent = ch;
+                            channelFilterEl.appendChild(option);
+                        });
+                    }
+                }
+                
+                return json.videos || [];
+            },
+            error: function(xhr, error, thrown) {
+                if (xhr.status === 401) {
+                    handleLogout();
+                } else {
+                    console.error('DataTable error:', error);
+                }
+            }
+        },
+        columns: [
+            {
+                data: null,
+                orderable: false,
+                searchable: false,
+                render: function(data, type, row) {
+                    const isSelected = selectedVideoIds.has(row.video_id);
+                    return `<input type="checkbox" class="video-checkbox" data-video-id="${row.video_id}" ${isSelected ? 'checked' : ''} ${isProcessing ? 'disabled' : ''}>`;
+                }
+            },
+            {
+                data: 'video_id',
+                render: function(data) {
+                    return `<a href="https://www.youtube.com/watch?v=${data}" target="_blank">${data}</a>`;
+                }
+            },
+            {
+                data: 'title',
+                render: function(data) {
+                    return data ? escapeHtml(data) : '-';
+                }
+            },
+            {
+                data: 'channel_name',
+                render: function(data) {
+                    return data ? escapeHtml(data) : '-';
+                }
+            },
+            {
+                data: 'video_url',
+                render: function(data) {
+                    if (!data) return '-';
+                    return `<a href="${data}" target="_blank" title="${data}">${data.length > 30 ? escapeHtml(data.substring(0, 30)) + '...' : escapeHtml(data)}</a>`;
+                }
+            },
+            {
+                data: 'status',
+                render: function(data) {
+                    return `<span class="status-badge status-${data}">${data}</span>`;
+                }
+            },
+            {
+                data: 'transcript',
+                orderable: false,
+                render: function(data, type, row) {
+                    if (!data) return '-';
+                    return `<span class="transcript-preview" onclick="showTranscript('${row.video_id}', \`${escapeHtml(data.substring(0, 100))}...\`)">${escapeHtml(data.substring(0, 50))}...</span>`;
+                }
+            },
+            {
+                data: null,
+                orderable: false,
+                searchable: false,
+                render: function(data, type, row) {
+                    return `<button onclick="showGeneratedContent('${row.video_id}', '${escapeHtml((row.title || row.video_id).replace(/'/g, "\\'"))}')" class="btn-secondary" style="font-size: 0.85rem;">View Content</button>`;
+                }
+            },
+            {
+                data: 'error_message',
+                orderable: false,
+                render: function(data) {
+                    return data ? escapeHtml(data.substring(0, 50)) + (data.length > 50 ? '...' : '') : '-';
+                }
+            },
+            {
+                data: 'created_at',
+                render: function(data) {
+                    return formatDate(data);
+                }
+            },
+            {
+                data: 'updated_at',
+                render: function(data) {
+                    return formatDate(data);
+                }
+            },
+            {
+                data: null,
+                orderable: false,
+                searchable: false,
+                render: function(data, type, row) {
+                    let html = '';
+                    if (row.transcript) {
+                        html += `<button onclick="showFullTranscript('${row.video_id}')" class="btn-secondary" style="font-size: 0.85rem; margin-right: 0.25rem;">View Full</button>`;
+                    }
+                    if (row.ignored) {
+                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', false)" class="btn-secondary" style="font-size: 0.85rem; background: #28a745;">Unignore</button>`;
+                    } else {
+                        html += `<button onclick="toggleIgnoreVideo('${row.video_id}', true)" class="btn-secondary" style="font-size: 0.85rem; background: #dc3545;">Ignore</button>`;
+                    }
+                    return html;
+                }
+            }
+        ],
+        order: [[10, 'desc']], // Sort by updated_at descending
+        pageLength: 25,
+        lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
+        language: {
+            processing: 'Loading videos...',
+            search: 'Search:',
+            lengthMenu: 'Show _MENU_ videos',
+            info: 'Showing _START_ to _END_ of _TOTAL_ videos',
+            infoEmpty: 'No videos found',
+            infoFiltered: '(filtered from _MAX_ total videos)',
+            zeroRecords: 'No matching videos found'
+        }
+    });
+    
+    // Attach checkbox listeners after table is drawn
+    table.addEventListener('draw.dt', function() {
+        document.querySelectorAll('.video-checkbox').forEach(checkbox => {
+            checkbox.addEventListener('change', handleVideoCheckboxChange);
+        });
+    });
 }
 
 function formatDate(dateString) {
@@ -1019,6 +1209,178 @@ async function handleTestWebhook() {
     } finally {
         testBtn.disabled = false;
         testBtn.textContent = 'Test Webhook';
+    }
+}
+
+// Proxy Management Functions
+async function loadProxy() {
+    try {
+        const response = await fetch('/api/admin/settings/ytdlp_proxy', {
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        const proxyInput = document.getElementById('ytdlpProxyInput');
+        const proxyStatusText = document.getElementById('proxyStatusText');
+        
+        if (response.ok) {
+            const data = await response.json();
+            const proxy = data.value || '';
+            
+            if (proxyInput) {
+                proxyInput.value = proxy;
+            }
+            
+            if (proxyStatusText) {
+                if (proxy) {
+                    // Mask password in display
+                    const maskedProxy = proxy.replace(/:([^:@]+)@/, ':****@');
+                    proxyStatusText.textContent = `Proxy configured: ${maskedProxy}`;
+                } else {
+                    proxyStatusText.textContent = 'No proxy configured';
+                }
+            }
+        } else if (response.status === 401) {
+            handleLogout();
+        }
+    } catch (error) {
+        console.error('Error loading proxy:', error);
+        const proxyStatusText = document.getElementById('proxyStatusText');
+        if (proxyStatusText) {
+            proxyStatusText.textContent = 'Error loading proxy status';
+        }
+    }
+}
+
+async function handleSaveProxy() {
+    const proxyInput = document.getElementById('ytdlpProxyInput');
+    const statusDiv = document.getElementById('proxyStatus');
+    const saveBtn = document.getElementById('saveProxyBtn');
+    
+    if (!proxyInput) return;
+    
+    const proxy = proxyInput.value.trim();
+    
+    saveBtn.disabled = true;
+    saveBtn.textContent = 'Saving...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Saving proxy configuration...';
+    
+    try {
+        const response = await fetch('/api/admin/settings/ytdlp_proxy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ value: proxy })
+        });
+        
+        if (response.ok) {
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = 'Proxy saved successfully!';
+            await loadProxy(); // Refresh status
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Failed to save proxy';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Error saving proxy: ' + error.message;
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = 'Save Proxy';
+    }
+}
+
+async function handleTestProxy() {
+    const proxyInput = document.getElementById('ytdlpProxyInput');
+    const statusDiv = document.getElementById('proxyStatus');
+    const testBtn = document.getElementById('testProxyBtn');
+    
+    if (!proxyInput) return;
+    
+    const proxy = proxyInput.value.trim();
+    
+    if (!proxy) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Please enter a proxy URL first';
+        return;
+    }
+    
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Testing proxy connection...';
+    
+    try {
+        const response = await fetch('/api/admin/test-proxy', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({ proxy: proxy })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = data.message || 'Proxy test successful!';
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Proxy test failed';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Error testing proxy: ' + error.message;
+    } finally {
+        testBtn.disabled = false;
+        testBtn.textContent = 'Test Proxy';
+    }
+}
+
+async function handleDeleteProxy() {
+    const statusDiv = document.getElementById('proxyStatus');
+    const deleteBtn = document.getElementById('deleteProxyBtn');
+    
+    if (!await showConfirmModal('Delete Proxy', 'Are you sure you want to delete the proxy configuration?')) {
+        return;
+    }
+    
+    deleteBtn.disabled = true;
+    deleteBtn.textContent = 'Deleting...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Deleting proxy configuration...';
+    
+    try {
+        const response = await fetch('/api/admin/settings/ytdlp_proxy', {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+        
+        if (response.ok) {
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = 'Proxy deleted successfully!';
+            await loadProxy(); // Refresh status
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Failed to delete proxy';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Error deleting proxy: ' + error.message;
+    } finally {
+        deleteBtn.disabled = false;
+        deleteBtn.textContent = 'Delete Proxy';
     }
 }
 
@@ -1493,10 +1855,25 @@ function handleClearAI() {
 
 // Bulk Operations
 async function handleBulkGetData() {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
         showToast('Please select at least one video', 'info');
         return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    const btn = document.getElementById('bulkGetDataBtn');
+    const originalText = btn ? btn.textContent : 'Get Data';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
     }
     
     try {
@@ -1509,15 +1886,34 @@ async function handleBulkGetData() {
             body: JSON.stringify({ video_ids: videoIds })
         });
         
-        const data = await response.json();
-        console.log('Bulk data results:', data);
-        showToast(`Retrieved data for ${data.results.length} video(s)`, 'success');
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Retrieved data for ${data.results.length} video(s)`, 'success');
+            await loadData(); // Refresh table
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error getting data', 'error');
+        }
     } catch (error) {
         showToast('Error getting data: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 }
 
 async function handleBulkTranscribe() {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
         showToast('Please select at least one video', 'info');
@@ -1527,6 +1923,16 @@ async function handleBulkTranscribe() {
     const confirmed = await showConfirmModal('Transcribe Videos', `Transcribe ${videoIds.length} video(s)? This may take a while.`);
     if (!confirmed) {
         return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    const btn = document.getElementById('bulkTranscribeBtn');
+    const originalText = btn ? btn.textContent : 'Transcribe';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
     }
     
     try {
@@ -1539,14 +1945,34 @@ async function handleBulkTranscribe() {
             body: JSON.stringify({ video_ids: videoIds })
         });
         
-        const data = await response.json();
-        loadData(); // Refresh
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Transcription started for ${videoIds.length} video(s)`, 'success');
+            await loadData(); // Refresh table
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error transcribing videos', 'error');
+        }
     } catch (error) {
         showToast('Error transcribing videos: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 }
 
 async function handleBulkGenerateContent() {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
         showToast('Please select at least one video', 'info');
@@ -1560,6 +1986,16 @@ async function handleBulkGenerateContent() {
     if (!promptId && !customPrompt) {
         showToast('Please provide either a prompt ID or custom prompt', 'info');
         return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    const btn = document.getElementById('bulkGenerateContentBtn');
+    const originalText = btn ? btn.textContent : 'Generate Content';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
     }
     
     try {
@@ -1576,11 +2012,25 @@ async function handleBulkGenerateContent() {
             })
         });
         
-        const data = await response.json();
-        console.log('Bulk content generation results:', data);
-        showToast(`Generated content for ${data.results.length} video(s)`, 'success');
+        if (response.ok) {
+            const data = await response.json();
+            showToast(`Generated content for ${data.results.length} video(s)`, 'success');
+            await loadData(); // Refresh table
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            showToast(error.detail || 'Error generating content', 'error');
+        }
     } catch (error) {
         showToast('Error generating content: ' + error.message, 'error');
+    } finally {
+        isProcessing = false;
+        setProcessingState(false);
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+        }
     }
 }
 
@@ -1874,6 +2324,11 @@ async function toggleIgnoreVideo(videoId, ignored) {
 }
 
 async function handleBulkIgnore() {
+    if (isProcessing) {
+        showToast('Another operation is in progress. Please wait...', 'info');
+        return;
+    }
+    
     const videoIds = Array.from(selectedVideoIds);
     if (videoIds.length === 0) {
         showToast('Please select videos to ignore', 'info');
@@ -1883,6 +2338,16 @@ async function handleBulkIgnore() {
     const confirmed = await showConfirmModal('Ignore Videos', `Ignore ${videoIds.length} video(s)?`);
     if (!confirmed) {
         return;
+    }
+    
+    isProcessing = true;
+    setProcessingState(true);
+    
+    const btn = document.getElementById('bulkIgnoreBtn');
+    const originalText = btn ? btn.textContent : 'Ignore Selected';
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Processing...';
     }
     
     try {
@@ -1900,8 +2365,9 @@ async function handleBulkIgnore() {
         
         if (response.ok) {
             const result = await response.json();
+            showToast(`Ignored ${result.count || videoIds.length} video(s)`, 'success');
             selectedVideoIds.clear();
-            loadData();
+            await loadData();
         } else if (response.status === 401) {
             handleLogout();
         } else {

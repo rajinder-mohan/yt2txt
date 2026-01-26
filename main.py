@@ -1431,7 +1431,64 @@ async def get_videos_endpoint(
             query += " OFFSET %s" if DB_TYPE == "postgres" else " OFFSET ?"
             params.append(offset)
     
+    # Get total count for pagination (before LIMIT/OFFSET)
+    # Build count query with same conditions but without LIMIT/OFFSET
+    count_query = "SELECT COUNT(*) as total FROM video_transcriptions"
+    count_params = []
+    count_conditions = []
+    
+    # Apply same filters for count
+    if not show_ignored:
+        if DB_TYPE == "postgres":
+            count_conditions.append("(ignored IS NULL OR ignored = FALSE)")
+        else:  # SQLite
+            count_conditions.append("(ignored IS NULL OR ignored = 0)")
+    
+    if status:
+        if status in ['pending', 'processing', 'processed', 'failed', 'success', 'rate_limited']:
+            if status == 'processed' or status == 'success':
+                count_conditions.append("status IN ('success', 'processed')")
+            else:
+                count_conditions.append("status = %s" if DB_TYPE == "postgres" else "status = ?")
+                count_params.append(status)
+    
+    if channel:
+        count_conditions.append("channel_name = %s" if DB_TYPE == "postgres" else "channel_name = ?")
+        count_params.append(channel)
+    
+    if search:
+        search_pattern = f"%{search}%"
+        if DB_TYPE == "postgres":
+            count_conditions.append("(video_id ILIKE %s OR title ILIKE %s OR channel_name ILIKE %s)")
+        else:
+            count_conditions.append("(video_id LIKE ? OR title LIKE ? OR channel_name LIKE ?)")
+        count_params.extend([search_pattern, search_pattern, search_pattern])
+    
+    if date_from:
+        count_conditions.append("updated_at >= %s" if DB_TYPE == "postgres" else "updated_at >= ?")
+        count_params.append(date_from)
+    
+    if date_to:
+        count_conditions.append("updated_at <= %s" if DB_TYPE == "postgres" else "updated_at <= ?")
+        count_params.append(f"{date_to} 23:59:59")
+    
+    if count_conditions:
+        count_query += " WHERE " + " AND ".join(count_conditions)
+    
     with get_db_connection() as conn:
+        # Get total count
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            cursor.execute(count_query, tuple(count_params) if count_params else None)
+            total_count = cursor.fetchone()['total']
+            cursor.close()
+        else:  # SQLite
+            cursor = conn.cursor()
+            cursor.execute(count_query, tuple(count_params) if count_params else None)
+            total_count = cursor.fetchone()[0]
+            cursor.close()
+        
+        # Get videos
         videos = fetch_all(conn, query, tuple(params) if params else None)
     
     # Parse JSON metadata for each video
@@ -1444,7 +1501,8 @@ async def get_videos_endpoint(
                 video['metadata'] = None
     
     return {
-        "total": len(videos),
+        "total": total_count,
+        "count": len(videos),
         "videos": videos
     }
 
