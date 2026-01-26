@@ -36,20 +36,14 @@ POSTGRES_PASSWORD=postgres
 # YouTube Configuration
 # ============================================
 
-# YouTube Cookies (Optional but Recommended)
-# Helps bypass bot detection. Get cookies from browser and paste here.
-# Format: "name1=value1; name2=value2; ..."
-# See "Getting YouTube Cookies" section below
-YOUTUBE_COOKIES=
-
-# Alternative: Path to cookies file (Netscape format)
-# YOUTUBE_COOKIES_FILE=/path/to/cookies.txt
-
-# Alternative: Extract cookies from browser
-# YOUTUBE_COOKIES_BROWSER=chrome
-
 # Rate Limiting: Delay between YouTube requests (seconds)
 YOUTUBE_SLEEP_INTERVAL=2.0
+
+# Proxy Configuration (Optional)
+# Proxy URL for yt-dlp requests (useful for Bright Data, etc.)
+# Format: http://USERNAME:PASSWORD@proxy.example.com:PORT
+# Example: http://brd-customer-USERNAME:PASSWORD@brd.superproxy.io:33335
+YTDLP_PROXY=
 
 # ============================================
 # Server Configuration
@@ -57,25 +51,6 @@ YOUTUBE_SLEEP_INTERVAL=2.0
 
 # Server Port (default: 8001)
 PORT=8001
-```
-
-## Getting YouTube Cookies
-
-YouTube cookies are **highly recommended** to avoid bot detection errors. Here's how to get them:
-
-1. **Open YouTube in your browser** (logged in)
-2. **Open Developer Tools** (F12 or Right-click → Inspect)
-3. **Go to Network tab**
-4. **Visit any YouTube page** (e.g., https://www.youtube.com/@examplechannel)
-5. **Find a request to `youtube.com`** in the network list
-6. **Click on the request** → Go to **Headers** tab
-7. **Scroll down** to find the **`cookie:`** header
-8. **Copy the entire cookie value** (everything after "cookie: ")
-9. **Paste it in `.env`** as `YOUTUBE_COOKIES=...`
-
-**Example:**
-```
-YOUTUBE_COOKIES="VISITOR_INFO1_LIVE=abc123; YSC=xyz789; PREF=..."
 ```
 
 ## Email Configuration (Optional)
@@ -93,10 +68,39 @@ SMTP_USE_TLS=true
 
 **Note:** For Gmail, you'll need to use an [App Password](https://support.google.com/accounts/answer/185833) instead of your regular password.
 
+## Proxy Configuration
+
+If you're using a proxy service (like Bright Data), you can configure it in two ways:
+
+### 1. Environment Variable (Recommended for Docker)
+
+Add to your `.env` file:
+```bash
+YTDLP_PROXY=http://USERNAME:PASSWORD@brd.superproxy.io:33335
+```
+
+### 2. Dashboard Settings (Recommended for UI)
+
+1. Go to **Settings** tab in the admin dashboard
+2. Scroll to **Proxy Configuration** section
+3. Enter your proxy URL
+4. Click **Save Proxy**
+5. Optionally click **Test Proxy** to verify it works
+
+**Proxy Format Examples:**
+- `http://username:password@proxy.example.com:8080`
+- `https://username:password@proxy.example.com:8080`
+- `socks5://username:password@proxy.example.com:1080`
+
+**Note:** For Bright Data or similar services that require certificates:
+1. Place the certificate file in `certs/brightdata-33335.crt`
+2. The Dockerfile will automatically install it
+3. Or mount it in docker-compose.yml
+
 ## Configuration Tips
 
 - **API Keys**: Can be provided in `.env` file or in request body (for testing)
-- **Cookies**: Essential for avoiding YouTube bot detection
+- **Proxy**: Useful for bypassing geo-restrictions or using proxy services
 - **Rate Limiting**: Increase `YOUTUBE_SLEEP_INTERVAL` if you encounter rate limits
 - **Database**: SQLite is fine for development, PostgreSQL recommended for production
 

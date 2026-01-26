@@ -1,9 +1,19 @@
 FROM python:3.13-slim
 
-# Install system dependencies
+# Install system dependencies including ca-certificates for proxy certificates
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+
+# Copy certificate files if they exist (for Bright Data or similar proxy services)
+# Create certs directory and copy certificate
+COPY certs/brightdata-33335.crt /usr/local/share/ca-certificates/brightdata-33335.crt 2>/dev/null || true
+
+# Update CA certificates (only if cert file exists)
+RUN if [ -f /usr/local/share/ca-certificates/brightdata-33335.crt ]; then \
+        update-ca-certificates; \
+    fi
 
 # Set working directory
 WORKDIR /app

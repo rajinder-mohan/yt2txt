@@ -554,49 +554,46 @@
                 </div>
             </div>
             
-            <div class="channel-submit-section" style="margin-top: 2rem; border: 2px solid #ff9800; padding: 1.5rem; background: #fff3e0;">
-                <h2 style="color: #ff9800;">⚠️ YouTube Cookies (Required to Fix Bot Detection)</h2>
-                <p style="margin-bottom: 1.5rem; color: #e65100; font-weight: 500;">
-                    <strong>IMPORTANT:</strong> Configure YouTube cookies to bypass bot detection. Without cookies, you will get "Sign in to confirm you're not a bot" errors.
+            <div class="channel-submit-section" style="margin-top: 2rem; border: 2px solid #4CAF50; padding: 1.5rem; background: #f1f8e9;">
+                <h2 style="color: #4CAF50;">🌐 Proxy Configuration (Optional)</h2>
+                <p style="margin-bottom: 1.5rem; color: #2e7d32; font-weight: 500;">
+                    Configure a proxy server for yt-dlp requests. This is useful for bypassing geo-restrictions or using services like Bright Data.
                 </p>
                 
                 <div class="settings-form-section">
                     <div class="form-group" style="margin-bottom: 1rem;">
-                        <label for="youtubeCookiesInput" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
-                            Cookie String:
+                        <label for="ytdlpProxyInput" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
+                            Proxy URL:
                         </label>
-                        <textarea 
-                            id="youtubeCookiesInput" 
-                            placeholder="Paste cookie string from browser here (format: name1=value1; name2=value2; ...)" 
-                            rows="4"
-                            style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-size: 0.9rem; font-family: monospace;"
-                        ></textarea>
+                        <input 
+                            type="text" 
+                            id="ytdlpProxyInput" 
+                            placeholder="http://USERNAME:PASSWORD@proxy.example.com:PORT" 
+                            style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 5px; font-size: 0.95rem; font-family: monospace;"
+                        >
                         <div style="margin-top: 0.5rem; padding: 0.75rem; background: #f8f9fa; border-radius: 5px; font-size: 0.85rem; color: #666;">
-                            <strong>How to get cookies:</strong>
-                            <ol style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
-                                <li>Open YouTube in your browser</li>
-                                <li>Open Developer Tools (F12 or Right-click → Inspect)</li>
-                                <li>Go to the <strong>Network</strong> tab</li>
-                                <li>Visit any YouTube page (e.g., https://www.youtube.com/@examplechannel)</li>
-                                <li>Find a request to <code>youtube.com</code> in the network list</li>
-                                <li>Click on the request → Go to <strong>Headers</strong> tab</li>
-                                <li>Scroll down to find the <strong>cookie:</strong> header</li>
-                                <li>Copy the entire cookie value (everything after "cookie: ")</li>
-                                <li>Paste it in the field above</li>
-                            </ol>
+                            <strong>Proxy Format:</strong>
+                            <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0;">
+                                <li><code>http://username:password@proxy.example.com:8080</code></li>
+                                <li><code>https://username:password@proxy.example.com:8080</code></li>
+                                <li><code>socks5://username:password@proxy.example.com:1080</code></li>
+                            </ul>
+                            <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                                <strong>Note:</strong> If using Bright Data or similar services, make sure to include the full URL with credentials. The proxy will be used for all yt-dlp requests.
+                            </p>
                         </div>
                     </div>
                     
                     <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
-                        <button id="saveCookiesBtn" class="btn-primary">Save Cookies</button>
-                        <button id="testCookiesBtn" class="btn-secondary">Test Cookies</button>
-                        <button id="deleteCookiesBtn" class="btn-secondary" style="background: #dc3545;">Delete Cookies</button>
+                        <button id="saveProxyBtn" class="btn-primary">Save Proxy</button>
+                        <button id="testProxyBtn" class="btn-secondary">Test Proxy</button>
+                        <button id="deleteProxyBtn" class="btn-secondary" style="background: #dc3545;">Delete Proxy</button>
                     </div>
                     
-                    <div id="cookiesStatus" class="channel-status" style="margin-top: 1rem;"></div>
+                    <div id="proxyStatus" class="channel-status" style="margin-top: 1rem;"></div>
                     
-                    <div id="cookiesInfo" style="margin-top: 1rem; padding: 0.75rem; background: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 4px; font-size: 0.85rem; color: #0c5460;">
-                        <strong>Current Status:</strong> <span id="cookiesStatusText">Loading...</span>
+                    <div id="proxyInfo" style="margin-top: 1rem; padding: 0.75rem; background: #e7f3ff; border-left: 4px solid #2196F3; border-radius: 4px; font-size: 0.85rem; color: #0c5460;">
+                        <strong>Current Status:</strong> <span id="proxyStatusText">Loading...</span>
                     </div>
                 </div>
             </div>

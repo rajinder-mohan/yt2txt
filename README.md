@@ -143,8 +143,8 @@ Key environment variables:
 DEEPGRAM_API_KEY=your-key          # Required
 OPENAI_API_KEY=your-key            # Required for AI features
 DB_TYPE=sqlite                      # or postgres
-YOUTUBE_COOKIES=...                # Highly recommended
 YOUTUBE_SLEEP_INTERVAL=2.0         # Rate limiting delay
+YTDLP_PROXY=...                    # Optional: Proxy URL for yt-dlp
 ```
 
 See [Configuration Guide](docs/configuration.md) for complete setup.

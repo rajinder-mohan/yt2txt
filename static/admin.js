@@ -116,18 +116,18 @@ document.addEventListener('DOMContentLoaded', () => {
         clearHtmlBtn.addEventListener('click', handleClearHtml);
     }
     
-    // Cookie management buttons
-    const saveCookiesBtn = document.getElementById('saveCookiesBtn');
-    const testCookiesBtn = document.getElementById('testCookiesBtn');
-    const deleteCookiesBtn = document.getElementById('deleteCookiesBtn');
-    if (saveCookiesBtn) {
-        saveCookiesBtn.addEventListener('click', handleSaveCookies);
+    // Proxy management buttons
+    const saveProxyBtn = document.getElementById('saveProxyBtn');
+    const testProxyBtn = document.getElementById('testProxyBtn');
+    const deleteProxyBtn = document.getElementById('deleteProxyBtn');
+    if (saveProxyBtn) {
+        saveProxyBtn.addEventListener('click', handleSaveProxy);
     }
-    if (testCookiesBtn) {
-        testCookiesBtn.addEventListener('click', handleTestCookies);
+    if (testProxyBtn) {
+        testProxyBtn.addEventListener('click', handleTestProxy);
     }
-    if (deleteCookiesBtn) {
-        deleteCookiesBtn.addEventListener('click', handleDeleteCookies);
+    if (deleteProxyBtn) {
+        deleteProxyBtn.addEventListener('click', handleDeleteProxy);
     }
     
     // AI processing buttons
@@ -693,11 +693,12 @@ function switchTab(tabName) {
         } else if (tabName === 'transcripts') {
             loadTranscripts();
         } else if (tabName === 'settings') {
+            loadProxy();
             // Only load settings if the tab exists
             const settingsTab = document.getElementById('settingsTab');
             if (settingsTab) {
                 loadSettings();
-                loadCookies();
+                loadProxy();
             }
         } else if (tabName === 'channel') {
             // Channel tab doesn't need to load data
@@ -870,189 +871,6 @@ async function loadSettings() {
         console.error('Error loading settings:', error);
     }
     
-    // Load cookies
-    await loadCookies();
-}
-
-async function loadCookies() {
-    const cookiesInput = document.getElementById('youtubeCookiesInput');
-    const cookiesStatusText = document.getElementById('cookiesStatusText');
-    
-    if (!cookiesInput || !cookiesStatusText) {
-        return;
-    }
-    
-    try {
-        const response = await fetch('/api/admin/cookies', {
-            headers: { 'Authorization': `Bearer ${authToken}` }
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.has_cookies && data.cookies) {
-                cookiesInput.value = data.cookies;
-                const cookieCount = data.cookies.split(';').filter(c => c.trim() && c.includes('=')).length;
-                cookiesStatusText.textContent = `Cookies are configured (${cookieCount} cookies found)`;
-                cookiesStatusText.style.color = '#28a745';
-            } else {
-                cookiesInput.value = '';
-                cookiesStatusText.textContent = 'No cookies configured';
-                cookiesStatusText.style.color = '#dc3545';
-            }
-        } else if (response.status === 401) {
-            handleLogout();
-        }
-    } catch (error) {
-        console.error('Error loading cookies:', error);
-        if (cookiesStatusText) {
-            cookiesStatusText.textContent = 'Error loading cookies status';
-            cookiesStatusText.style.color = '#dc3545';
-        }
-    }
-}
-
-async function handleSaveCookies() {
-    const cookiesInput = document.getElementById('youtubeCookiesInput');
-    const statusDiv = document.getElementById('cookiesStatus');
-    const saveBtn = document.getElementById('saveCookiesBtn');
-    
-    if (!cookiesInput || !statusDiv || !saveBtn) {
-        return;
-    }
-    
-    const cookies = cookiesInput.value.trim();
-    
-    if (!cookies) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Please enter cookies';
-        return;
-    }
-    
-    // Validate cookie format
-    if (!cookies.includes('=')) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Invalid cookie format. Expected: name1=value1; name2=value2; ...';
-        return;
-    }
-    
-    saveBtn.disabled = true;
-    saveBtn.textContent = 'Saving...';
-    statusDiv.className = 'channel-status info';
-    statusDiv.textContent = 'Saving cookies...';
-    
-    try {
-        const response = await fetch('/api/admin/cookies', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${authToken}`
-            },
-            body: JSON.stringify({ cookies: cookies })
-        });
-        
-        if (response.ok) {
-            const data = await response.json();
-            statusDiv.className = 'channel-status success';
-            statusDiv.textContent = `Cookies saved successfully! ${data.cookie_count || ''} cookies configured.`;
-            await loadCookies(); // Refresh status
-        } else {
-            const error = await response.json();
-            statusDiv.className = 'channel-status error';
-            statusDiv.textContent = error.detail || 'Failed to save cookies';
-        }
-    } catch (error) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Connection error: ' + error.message;
-    } finally {
-        saveBtn.disabled = false;
-        saveBtn.textContent = 'Save Cookies';
-    }
-}
-
-async function handleTestCookies() {
-    const cookiesInput = document.getElementById('youtubeCookiesInput');
-    const statusDiv = document.getElementById('cookiesStatus');
-    const testBtn = document.getElementById('testCookiesBtn');
-    
-    if (!cookiesInput || !statusDiv || !testBtn) {
-        return;
-    }
-    
-    const cookies = cookiesInput.value.trim();
-    
-    if (!cookies) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Please enter cookies first';
-        return;
-    }
-    
-    testBtn.disabled = true;
-    testBtn.textContent = 'Testing...';
-    statusDiv.className = 'channel-status info';
-    statusDiv.textContent = 'Testing cookies format...';
-    
-    // Basic validation
-    const cookieCount = cookies.split(';').filter(c => c.trim() && c.includes('=')).length;
-    
-    if (cookieCount === 0) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Invalid cookie format. No valid cookies found.';
-    } else {
-        statusDiv.className = 'channel-status success';
-        statusDiv.textContent = `Cookie format is valid! Found ${cookieCount} cookies. Save them to use with YouTube requests.`;
-    }
-    
-    testBtn.disabled = false;
-    testBtn.textContent = 'Test Cookies';
-}
-
-async function handleDeleteCookies() {
-    const confirmed = await showConfirmModal('Delete Cookies', 'Are you sure you want to delete all stored cookies? This may cause YouTube bot detection errors.');
-    if (!confirmed) {
-        return;
-    }
-    
-    const statusDiv = document.getElementById('cookiesStatus');
-    const deleteBtn = document.getElementById('deleteCookiesBtn');
-    const cookiesInput = document.getElementById('youtubeCookiesInput');
-    
-    if (!statusDiv || !deleteBtn) {
-        return;
-    }
-    
-    deleteBtn.disabled = true;
-    deleteBtn.textContent = 'Deleting...';
-    statusDiv.className = 'channel-status info';
-    statusDiv.textContent = 'Deleting cookies...';
-    
-    try {
-        const response = await fetch('/api/admin/cookies', {
-            method: 'DELETE',
-            headers: {
-                'Authorization': `Bearer ${authToken}`
-            }
-        });
-        
-        if (response.ok) {
-            statusDiv.className = 'channel-status success';
-            statusDiv.textContent = 'Cookies deleted successfully';
-            if (cookiesInput) {
-                cookiesInput.value = '';
-            }
-            await loadCookies(); // Refresh status
-        } else {
-            const error = await response.json();
-            statusDiv.className = 'channel-status error';
-            statusDiv.textContent = error.detail || 'Failed to delete cookies';
-        }
-    } catch (error) {
-        statusDiv.className = 'channel-status error';
-        statusDiv.textContent = 'Connection error: ' + error.message;
-    } finally {
-        deleteBtn.disabled = false;
-        deleteBtn.textContent = 'Delete Cookies';
-    }
-}
 
 async function handleSaveWebhook() {
     const webhookUrlInput = document.getElementById('n8nWebhookUrlInput');
