@@ -108,7 +108,7 @@ from requests.auth import HTTPBasicAuth
 # Transcribe a video
 response = requests.post(
     "http://localhost:8001/transcribe",
-    json={"videos": ["dQw4w9WgXcQ"]},
+    json={"videos": ["abc123xyz45"]},
     auth=HTTPBasicAuth("admin", "admin")
 )
 result = response.json()

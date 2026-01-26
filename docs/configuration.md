@@ -66,7 +66,7 @@ YouTube cookies are **highly recommended** to avoid bot detection errors. Here's
 1. **Open YouTube in your browser** (logged in)
 2. **Open Developer Tools** (F12 or Right-click → Inspect)
 3. **Go to Network tab**
-4. **Visit any YouTube page** (e.g., https://www.youtube.com/@channelname)
+4. **Visit any YouTube page** (e.g., https://www.youtube.com/@examplechannel)
 5. **Find a request to `youtube.com`** in the network list
 6. **Click on the request** → Go to **Headers** tab
 7. **Scroll down** to find the **`cookie:`** header

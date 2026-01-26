@@ -23,7 +23,7 @@ Transcribe YouTube videos using Deepgram API.
 **Request:**
 ```json
 {
-  "videos": ["dQw4w9WgXcQ", "https://www.youtube.com/watch?v=VIDEO_ID"],
+  "videos": ["abc123xyz45", "https://www.youtube.com/watch?v=VIDEO_ID"],
   "deepgram_api_key": "your-key"
 }
 ```
@@ -33,8 +33,8 @@ Transcribe YouTube videos using Deepgram API.
 {
   "success": [
     {
-      "video_id": "dQw4w9WgXcQ",
-      "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "video_id": "abc123xyz45",
+      "video_url": "https://www.youtube.com/watch?v=abc123xyz45",
       "transcript": "Full transcript text...",
       "status": "success",
       "from_cache": false
@@ -50,12 +50,12 @@ Get video information and transcript by video ID or URL.
 **Response:**
 ```json
 {
-  "video_id": "dQw4w9WgXcQ",
-  "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+  "video_id": "abc123xyz45",
+  "video_url": "https://www.youtube.com/watch?v=abc123xyz45",
   "status": "processed",
   "transcript": "Full transcript...",
   "title": "Video Title",
-  "channel_name": "Channel Name",
+  "channel_name": "Example Channel",
   "duration": 180,
   "view_count": 1000000,
   "upload_date": "2024-01-01",
@@ -69,7 +69,7 @@ Extract videos from YouTube channel.
 **Request:**
 ```json
 {
-  "channel_url": "https://www.youtube.com/@channelname",
+  "channel_url": "https://www.youtube.com/@examplechannel",
   "max_results": 50
 }
 ```

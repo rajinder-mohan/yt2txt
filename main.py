@@ -195,19 +195,19 @@ class VideoRequest(BaseModel):
     - video_urls: List of YouTube video URLs
     
     Examples:
-    - Video ID: "dQw4w9WgXcQ"
-    - Full URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    - Short URL: "https://youtu.be/dQw4w9WgXcQ"
+    - Video ID: "abc123xyz45"
+    - Full URL: "https://www.youtube.com/watch?v=abc123xyz45"
+    - Short URL: "https://youtu.be/abc123xyz45"
     """
     videos: Optional[List[str]] = Field(
         None,
-        description="List of YouTube video IDs or URLs (recommended - accepts both). Examples: 'dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=VIDEO_ID', 'https://youtu.be/VIDEO_ID'",
-        example=["dQw4w9WgXcQ", "https://www.youtube.com/watch?v=VIDEO_ID_2", "https://youtu.be/VIDEO_ID_3"]
+        description="List of YouTube video IDs or URLs (recommended - accepts both). Examples: 'abc123xyz45', 'https://www.youtube.com/watch?v=VIDEO_ID', 'https://youtu.be/VIDEO_ID'",
+        example=["abc123xyz45", "https://www.youtube.com/watch?v=VIDEO_ID_2", "https://youtu.be/VIDEO_ID_3"]
     )
     video_ids: Optional[List[str]] = Field(
         None,
-        description="List of YouTube video IDs or URLs. Examples: 'dQw4w9WgXcQ', 'https://www.youtube.com/watch?v=VIDEO_ID'",
-        example=["dQw4w9WgXcQ", "https://www.youtube.com/watch?v=VIDEO_ID"]
+        description="List of YouTube video IDs or URLs. Examples: 'abc123xyz45', 'https://www.youtube.com/watch?v=VIDEO_ID'",
+        example=["abc123xyz45", "https://www.youtube.com/watch?v=VIDEO_ID"]
     )
     video_urls: Optional[List[str]] = Field(
         None,
@@ -224,7 +224,7 @@ class VideoRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "videos": [
-                    "dQw4w9WgXcQ",
+                    "abc123xyz45",
                     "https://www.youtube.com/watch?v=VIDEO_ID_2",
                     "https://youtu.be/VIDEO_ID_3"
                 ],
@@ -539,10 +539,10 @@ async def transcribe_videos(request: VideoRequest):
     6. Returns transcription results with full transcript text
     
     **Input formats:**
-    - Video ID: "dQw4w9WgXcQ"
-    - Full URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
-    - Short URL: "https://youtu.be/dQw4w9WgXcQ"
-    - Embed URL: "https://www.youtube.com/embed/dQw4w9WgXcQ"
+    - Video ID: "abc123xyz45"
+    - Full URL: "https://www.youtube.com/watch?v=abc123xyz45"
+    - Short URL: "https://youtu.be/abc123xyz45"
+    - Embed URL: "https://www.youtube.com/embed/abc123xyz45"
     
     **Features:**
     - Duplicate detection: Skips already processed videos
@@ -808,8 +808,8 @@ async def get_video_status(video_id: str):
       - Creation and update timestamps
     
     **Input:**
-    - Video ID: `/video/dQw4w9WgXcQ`
-    - Video URL: `/video/https://www.youtube.com/watch?v=dQw4w9WgXcQ`
+    - Video ID: `/video/abc123xyz45`
+    - Video URL: `/video/https://www.youtube.com/watch?v=abc123xyz45`
     
     **Returns:**
     - 200: Complete video data with all fields
@@ -867,8 +867,8 @@ class ChannelRequest(BaseModel):
     """Request model for getting video IDs from a YouTube channel."""
     channel_url: str = Field(
         ...,
-        description="YouTube channel URL. Examples: 'https://www.youtube.com/@channelname', 'https://www.youtube.com/channel/CHANNEL_ID', 'https://www.youtube.com/c/channelname', 'https://www.youtube.com/user/username'",
-        example="https://www.youtube.com/@channelname"
+        description="YouTube channel URL. Examples: 'https://www.youtube.com/@examplechannel', 'https://www.youtube.com/channel/CHANNEL_ID', 'https://www.youtube.com/c/examplechannel', 'https://www.youtube.com/user/username'",
+        example="https://www.youtube.com/@examplechannel"
     )
     max_results: Optional[int] = Field(
         None,
@@ -1066,11 +1066,11 @@ async def get_channel_videos(request: ChannelRequest):
     7. Returns list of all found videos with metadata
     
     **Supported channel URL formats:**
-    - `https://www.youtube.com/@channelname`
+    - `https://www.youtube.com/@examplechannel`
     - `https://www.youtube.com/channel/CHANNEL_ID`
-    - `https://www.youtube.com/c/channelname`
+    - `https://www.youtube.com/c/examplechannel`
     - `https://www.youtube.com/user/username`
-    - `https://www.youtube.com/@channelname/videos`
+    - `https://www.youtube.com/@examplechannel/videos`
     
     **Features:**
     - Automatic pagination: Gets all videos, not just first page
@@ -2291,9 +2291,9 @@ def extract_youtube_video_ids(html: str) -> List[str]:
 def parse_video_ids_from_text(text: str) -> List[str]:
     """
     Parse video IDs from comma-separated text that may contain:
-    - Video IDs: dQw4w9WgXcQ
-    - Full URLs: https://www.youtube.com/watch?v=dQw4w9WgXcQ
-    - Short URLs: https://youtu.be/dQw4w9WgXcQ
+    - Video IDs: abc123xyz45
+    - Full URLs: https://www.youtube.com/watch?v=abc123xyz45
+    - Short URLs: https://youtu.be/abc123xyz45
     """
     video_ids = set()
     
@@ -2327,9 +2327,9 @@ def parse_video_ids_from_text(text: str) -> List[str]:
 def parse_video_ids_from_text(text: str) -> List[str]:
     """
     Parse video IDs from comma-separated text that may contain:
-    - Video IDs: dQw4w9WgXcQ
-    - Full URLs: https://www.youtube.com/watch?v=dQw4w9WgXcQ
-    - Short URLs: https://youtu.be/dQw4w9WgXcQ
+    - Video IDs: abc123xyz45
+    - Full URLs: https://www.youtube.com/watch?v=abc123xyz45
+    - Short URLs: https://youtu.be/abc123xyz45
     """
     video_ids = set()
     
@@ -2479,8 +2479,8 @@ async def manual_add_videos_endpoint(
     **Input:**
     - `channel_name`: Name of the channel/author
     - `videos`: Comma-separated list of video IDs or URLs
-      - Examples: "dQw4w9WgXcQ, jNQXAC9IVRw"
-      - Or: "https://www.youtube.com/watch?v=dQw4w9WgXcQ, https://youtu.be/jNQXAC9IVRw"
+      - Examples: "abc123xyz45, def456uvw78"
+      - Or: "https://www.youtube.com/watch?v=abc123xyz45, https://youtu.be/def456uvw78"
     
     **Response:**
     - `total`: Total number of video IDs parsed

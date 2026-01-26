@@ -98,7 +98,7 @@ curl -X POST "http://localhost:8001/transcribe" \
   -H "Authorization: Basic <base64(username:password)>" \
   -d '{
     "videos": [
-      "dQw4w9WgXcQ",
+      "abc123xyz45",
       "https://www.youtube.com/watch?v=VIDEO_ID_2"
     ],
     "deepgram_api_key": "your-key"
@@ -110,7 +110,7 @@ curl -X POST "http://localhost:8001/transcribe" \
 **Endpoint:** `GET /api/videos`
 
 ```bash
-curl -X GET "http://localhost:8001/api/videos?status=processed&channel=ChannelName&limit=10" \
+curl -X GET "http://localhost:8001/api/videos?status=processed&channel=ExampleChannel&limit=10" \
   -H "Authorization: Basic <base64(username:password)>"
 ```
 
@@ -132,7 +132,7 @@ curl -X POST "http://localhost:8001/channel/videos" \
   -H "Content-Type: application/json" \
   -H "Authorization: Basic <base64(username:password)>" \
   -d '{
-    "channel_url": "https://www.youtube.com/@channelname",
+    "channel_url": "https://www.youtube.com/@examplechannel",
     "max_results": 50
   }'
 ```
@@ -198,7 +198,7 @@ auth = HTTPBasicAuth("admin", "admin")
 response = requests.post(
     f"{BASE_URL}/transcribe",
     json={
-        "videos": ["dQw4w9WgXcQ"],
+        "videos": ["abc123xyz45"],
         "deepgram_api_key": "your-key"
     },
     auth=auth
