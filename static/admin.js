@@ -1316,14 +1316,26 @@ async function handleExtractIds() {
                 extractedIdsContainer.style.display = 'none';
                 processBtn.style.display = 'none';
             } else {
+                const stored = data.stored || 0;
+                const skipped = data.skipped || 0;
+                
                 statusDiv.className = 'channel-status success';
-                statusDiv.textContent = `Successfully extracted ${extractedVideoIds.length} unique video ID(s)!`;
+                if (stored > 0) {
+                    statusDiv.textContent = `Successfully extracted ${extractedVideoIds.length} unique video ID(s)! ${stored} new video(s) stored in database${skipped > 0 ? `, ${skipped} already existed` : ''}.`;
+                } else {
+                    statusDiv.textContent = `Extracted ${extractedVideoIds.length} unique video ID(s), but all already exist in database.`;
+                }
                 
                 // Display extracted IDs
                 extractedCount.textContent = extractedVideoIds.length;
                 extractedIdsList.textContent = extractedVideoIds.join(', ');
                 extractedIdsContainer.style.display = 'block';
                 processBtn.style.display = 'inline-block';
+                
+                // Refresh video list if new videos were stored
+                if (stored > 0) {
+                    loadData();
+                }
             }
         } else {
             const error = await response.json();

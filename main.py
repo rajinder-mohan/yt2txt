@@ -2260,6 +2260,8 @@ class HtmlExtractionResponse(BaseModel):
     """Response model for HTML extraction."""
     video_ids: List[str] = Field(..., description="List of extracted video IDs")
     count: int = Field(..., description="Total number of unique video IDs found")
+    stored: int = Field(0, description="Number of new video IDs stored in database")
+    skipped: int = Field(0, description="Number of video IDs that already existed (skipped)")
 
 
 def extract_youtube_video_ids(html: str) -> List[str]:
@@ -2294,13 +2296,15 @@ async def extract_video_ids_endpoint(
     """
     **Extract Video IDs from HTML**
     
-    Parses HTML content from YouTube pages to extract video IDs.
+    Parses HTML content from YouTube pages to extract video IDs and automatically stores them in the database.
     
     **What it does:**
     - Accepts HTML content from any YouTube page
     - Uses regex patterns to find video IDs
-    - Returns unique list of extracted video IDs
-    - Handles multiple video ID formats in HTML
+    - Extracts unique video IDs from HTML
+    - Automatically stores new video IDs in database with "pending" status
+    - Skips video IDs that already exist in database
+    - Returns list of all extracted IDs with storage statistics
     
     **Supported Patterns:**
     - `/watch?v=VIDEO_ID`
@@ -2311,14 +2315,22 @@ async def extract_video_ids_endpoint(
     - `html`: HTML content from YouTube page (paste page source)
     
     **Response:**
-    - Returns list of unique video IDs found
-    - Returns count of extracted IDs
+    - `video_ids`: List of all unique video IDs found
+    - `count`: Total number of unique video IDs extracted
+    - `stored`: Number of new video IDs stored in database
+    - `skipped`: Number of video IDs that already existed (skipped)
+    
+    **Database Storage:**
+    - New videos are stored with status "pending"
+    - Duplicate videos (already in database) are skipped
+    - Video URLs are automatically generated from IDs
     
     **Use cases:**
     - Extract IDs when channel API fails
     - Parse video IDs from custom pages
     - Extract IDs from search results
     - Alternative method for getting video lists
+    - Bulk import videos from HTML source
     """
     if not request.html or not request.html.strip():
         raise HTTPException(
@@ -2328,9 +2340,31 @@ async def extract_video_ids_endpoint(
     
     try:
         video_ids = extract_youtube_video_ids(request.html)
+        
+        # Store extracted video IDs in database with "pending" status
+        stored_count = 0
+        skipped_count = 0
+        
+        for video_id in video_ids:
+            # Check if video already exists
+            existing_video = get_video_record(video_id)
+            if not existing_video:
+                # Create new record with "pending" status
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                create_video_record(
+                    video_id=video_id,
+                    video_url=video_url,
+                    status="pending"
+                )
+                stored_count += 1
+            else:
+                skipped_count += 1
+        
         return HtmlExtractionResponse(
             video_ids=video_ids,
-            count=len(video_ids)
+            count=len(video_ids),
+            stored=stored_count,
+            skipped=skipped_count
         )
     except Exception as e:
         raise HTTPException(
