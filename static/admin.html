@@ -174,6 +174,44 @@
                 <div id="channelStatus" class="channel-status"></div>
             </div>
             
+            <!-- Manual Video Addition Section -->
+            <div class="channel-submit-section" style="margin-top: 2rem; border-top: 2px solid #ddd; padding-top: 2rem;">
+                <h2>Manually Add Videos</h2>
+                <p style="margin-bottom: 1rem; color: #666;">
+                    Paste comma-separated video IDs or URLs along with channel name to manually add videos to the database.
+                </p>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label for="manualChannelName" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
+                        Channel/Author Name: <span style="color: red;">*</span>
+                    </label>
+                    <input 
+                        type="text" 
+                        id="manualChannelName" 
+                        placeholder="e.g., Vineet Malhotra"
+                        style="width: 100%; max-width: 500px; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.95rem;"
+                    >
+                </div>
+                
+                <div style="margin-bottom: 1rem;">
+                    <label for="manualVideoInput" style="display: block; margin-bottom: 0.5rem; font-weight: 500;">
+                        Video IDs or URLs (comma-separated): <span style="color: red;">*</span>
+                    </label>
+                    <textarea 
+                        id="manualVideoInput" 
+                        rows="6"
+                        placeholder="Paste video IDs or URLs separated by commas. Examples:&#10;dQw4w9WgXcQ, jNQXAC9IVRw&#10;or&#10;https://www.youtube.com/watch?v=dQw4w9WgXcQ, https://www.youtube.com/watch?v=jNQXAC9IVRw"
+                        style="width: 100%; padding: 0.75rem; border: 1px solid #ddd; border-radius: 6px; font-size: 0.9rem; font-family: monospace; resize: vertical;"
+                    ></textarea>
+                    <p style="margin-top: 0.5rem; font-size: 0.85rem; color: #666;">
+                        You can paste video IDs (e.g., dQw4w9WgXcQ) or full URLs (e.g., https://www.youtube.com/watch?v=dQw4w9WgXcQ). Separate multiple entries with commas.
+                    </p>
+                </div>
+                
+                <button id="addManualVideosBtn" class="btn-primary">Add Videos</button>
+                <div id="manualVideoStatus" class="channel-status" style="margin-top: 1rem;"></div>
+            </div>
+            
             <div class="channel-submit-section" style="margin-top: 2rem; border-top: 2px solid #ddd; padding-top: 2rem;">
                 <h2>Extract Video IDs from HTML</h2>
                 <p style="margin-bottom: 1rem; color: #666;">

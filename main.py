@@ -2288,6 +2288,78 @@ def extract_youtube_video_ids(html: str) -> List[str]:
     return sorted(list(video_ids))
 
 
+def parse_video_ids_from_text(text: str) -> List[str]:
+    """
+    Parse video IDs from comma-separated text that may contain:
+    - Video IDs: dQw4w9WgXcQ
+    - Full URLs: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    - Short URLs: https://youtu.be/dQw4w9WgXcQ
+    """
+    video_ids = set()
+    
+    # Split by comma
+    items = [item.strip() for item in text.split(',')]
+    
+    for item in items:
+        if not item:
+            continue
+        
+        # Check if it's already a video ID (11 characters, alphanumeric + _ and -)
+        if re.match(r'^[a-zA-Z0-9_-]{11}$', item):
+            video_ids.add(item)
+        else:
+            # Try to extract from URL
+            patterns = [
+                r"(?:watch\?v=)([a-zA-Z0-9_-]{11})",
+                r"(?:youtu\.be/)([a-zA-Z0-9_-]{11})",
+                r"(?:/vi/)([a-zA-Z0-9_-]{11})",
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, item)
+                if match:
+                    video_ids.add(match.group(1))
+                    break
+    
+    return sorted(list(video_ids))
+
+
+def parse_video_ids_from_text(text: str) -> List[str]:
+    """
+    Parse video IDs from comma-separated text that may contain:
+    - Video IDs: dQw4w9WgXcQ
+    - Full URLs: https://www.youtube.com/watch?v=dQw4w9WgXcQ
+    - Short URLs: https://youtu.be/dQw4w9WgXcQ
+    """
+    video_ids = set()
+    
+    # Split by comma
+    items = [item.strip() for item in text.split(',')]
+    
+    for item in items:
+        if not item:
+            continue
+        
+        # Check if it's already a video ID (11 characters, alphanumeric + _ and -)
+        if re.match(r'^[a-zA-Z0-9_-]{11}$', item):
+            video_ids.add(item)
+        else:
+            # Try to extract from URL
+            patterns = [
+                r"(?:watch\?v=)([a-zA-Z0-9_-]{11})",
+                r"(?:youtu\.be/)([a-zA-Z0-9_-]{11})",
+                r"(?:/vi/)([a-zA-Z0-9_-]{11})",
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, item)
+                if match:
+                    video_ids.add(match.group(1))
+                    break
+    
+    return sorted(list(video_ids))
+
+
 @app.post("/api/extract-video-ids", response_model=HtmlExtractionResponse)
 async def extract_video_ids_endpoint(
     request: HtmlExtractionRequest,
@@ -2370,6 +2442,116 @@ async def extract_video_ids_endpoint(
         raise HTTPException(
             status_code=500,
             detail=f"Failed to extract video IDs: {str(e)}"
+        )
+
+
+# Manual Video Addition Endpoint
+class ManualAddVideosRequest(BaseModel):
+    """Request model for manually adding videos."""
+    channel_name: str = Field(..., description="Channel/author name")
+    videos: str = Field(..., description="Comma-separated video IDs or URLs")
+
+
+class ManualAddVideosResponse(BaseModel):
+    """Response model for manual video addition."""
+    total: int = Field(..., description="Total number of video IDs parsed")
+    stored: int = Field(..., description="Number of new videos stored in database")
+    skipped: int = Field(..., description="Number of videos that already existed")
+
+
+@app.post("/api/manual-add-videos", response_model=ManualAddVideosResponse)
+async def manual_add_videos_endpoint(
+    request: ManualAddVideosRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Manually Add Videos**
+    
+    Manually add videos to the database by providing comma-separated video IDs or URLs and a channel name.
+    
+    **What it does:**
+    - Accepts comma-separated video IDs or URLs
+    - Parses and extracts video IDs from the input
+    - Stores new videos in database with "pending" status
+    - Sets the channel name for all videos
+    - Skips videos that already exist in database
+    
+    **Input:**
+    - `channel_name`: Name of the channel/author
+    - `videos`: Comma-separated list of video IDs or URLs
+      - Examples: "dQw4w9WgXcQ, jNQXAC9IVRw"
+      - Or: "https://www.youtube.com/watch?v=dQw4w9WgXcQ, https://youtu.be/jNQXAC9IVRw"
+    
+    **Response:**
+    - `total`: Total number of video IDs parsed
+    - `stored`: Number of new videos stored
+    - `skipped`: Number of videos that already existed
+    
+    **Use cases:**
+    - Manually add specific videos
+    - Bulk import videos with known IDs
+    - Add videos from a list
+    - Import videos from external sources
+    """
+    if not request.channel_name or not request.channel_name.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Channel name cannot be empty"
+        )
+    
+    if not request.videos or not request.videos.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Videos list cannot be empty"
+        )
+    
+    try:
+        # Parse video IDs from the input text
+        video_ids = parse_video_ids_from_text(request.videos)
+        
+        if not video_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No valid video IDs found in the input. Please check the format."
+            )
+        
+        # Store videos in database
+        stored_count = 0
+        skipped_count = 0
+        
+        for video_id in video_ids:
+            # Check if video already exists
+            existing_video = get_video_record(video_id)
+            if not existing_video:
+                # Create new record with "pending" status and channel name
+                video_url = f"https://www.youtube.com/watch?v={video_id}"
+                create_video_record(
+                    video_id=video_id,
+                    video_url=video_url,
+                    status="pending",
+                    channel_name=request.channel_name.strip()
+                )
+                stored_count += 1
+            else:
+                # Update channel name if it's not set
+                if not existing_video.get('channel_name'):
+                    update_video_record(
+                        video_id=video_id,
+                        channel_name=request.channel_name.strip()
+                    )
+                skipped_count += 1
+        
+        return ManualAddVideosResponse(
+            total=len(video_ids),
+            stored=stored_count,
+            skipped=skipped_count
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to add videos: {str(e)}"
         )
 
 

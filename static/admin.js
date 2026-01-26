@@ -81,6 +81,10 @@ document.addEventListener('DOMContentLoaded', () => {
         showIgnoredCheckbox.addEventListener('change', loadData);
     }
     document.getElementById('submitChannelBtn').addEventListener('click', handleChannelSubmit);
+    const addManualVideosBtn = document.getElementById('addManualVideosBtn');
+    if (addManualVideosBtn) {
+        addManualVideosBtn.addEventListener('click', handleAddManualVideos);
+    }
     document.getElementById('createUserBtn').addEventListener('click', handleCreateUser);
     document.getElementById('refreshUsersBtn').addEventListener('click', loadUsers);
     
@@ -1269,6 +1273,73 @@ function filterTranscripts() {
     });
     
     displayTranscripts(filtered);
+}
+
+// Manual Video Addition Function
+async function handleAddManualVideos() {
+    const channelNameInput = document.getElementById('manualChannelName');
+    const videoInput = document.getElementById('manualVideoInput');
+    const statusDiv = document.getElementById('manualVideoStatus');
+    const addBtn = document.getElementById('addManualVideosBtn');
+    
+    const channelName = channelNameInput.value.trim();
+    const videoInputText = videoInput.value.trim();
+    
+    if (!channelName) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Please enter a channel/author name';
+        return;
+    }
+    
+    if (!videoInputText) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Please enter video IDs or URLs';
+        return;
+    }
+    
+    addBtn.disabled = true;
+    addBtn.textContent = 'Adding Videos...';
+    statusDiv.className = 'channel-status info';
+    statusDiv.textContent = 'Processing videos...';
+    
+    try {
+        const response = await fetch('/api/manual-add-videos', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            },
+            body: JSON.stringify({
+                channel_name: channelName,
+                videos: videoInputText
+            })
+        });
+        
+        if (response.ok) {
+            const data = await response.json();
+            statusDiv.className = 'channel-status success';
+            statusDiv.textContent = `Successfully added ${data.stored} video(s) to database${data.skipped > 0 ? `, ${data.skipped} already existed` : ''}!`;
+            
+            // Clear inputs
+            channelNameInput.value = '';
+            videoInput.value = '';
+            
+            // Refresh video list
+            loadData();
+        } else if (response.status === 401) {
+            handleLogout();
+        } else {
+            const error = await response.json();
+            statusDiv.className = 'channel-status error';
+            statusDiv.textContent = error.detail || 'Failed to add videos';
+        }
+    } catch (error) {
+        statusDiv.className = 'channel-status error';
+        statusDiv.textContent = 'Error adding videos: ' + error.message;
+    } finally {
+        addBtn.disabled = false;
+        addBtn.textContent = 'Add Videos';
+    }
 }
 
 // HTML Extraction Functions
