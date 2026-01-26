@@ -1,386 +1,829 @@
-# YouTube Audio Transcription Microservice
+# YouTube Audio Transcription & AI Content Generation Service
 
-A FastAPI microservice that downloads audio from YouTube videos and transcribes them using Deepgram's speech-to-text API. Features intelligent caching and tracking to avoid redundant downloads and transcriptions.
+A comprehensive FastAPI service for downloading YouTube videos, transcribing audio, managing AI prompts, and generating content using OpenAI GPT models. Features a full admin dashboard, bulk operations, and robust database storage.
 
-## Features
+## 🚀 Features
 
-- Download audio from YouTube videos using video IDs or URLs
-- Transcribe audio using Deepgram API
-- Support for multiple video IDs/URLs in a single request
-- **Database tracking** - Tracks all processed videos with status
-- **Smart caching** - Returns cached transcripts without re-processing
-- **Failed status tracking** - Prevents re-downloading failed videos
-- **Selective cleanup** - Audio files only deleted after successful transcription
-- **Admin Dashboard** - Web-based GUI for tracking and monitoring all videos
-- **Authentication** - Secure admin login system
-- Error handling for individual video processing
-- RESTful API with automatic documentation
-- **Dockerized** - Easy deployment with Docker
+### Core Functionality
+- **Video Transcription**: Download audio from YouTube videos and transcribe using Deepgram API
+- **Channel Processing**: Extract all videos from YouTube channels with automatic pagination
+- **Metadata Extraction**: Capture complete video metadata (title, channel, duration, views, upload date, etc.)
+- **Smart Caching**: Avoids re-processing already transcribed videos
+- **Rate Limiting Protection**: Handles YouTube bot detection and rate limits gracefully
 
-## Prerequisites
+### AI Integration
+- **OpenAI GPT Integration**: Generate content using GPT-3.5, GPT-4, and other models
+- **Prompt Management**: Store and reuse AI prompts with variable templates
+- **Bulk Content Generation**: Generate AI content for multiple videos simultaneously
+- **Content Storage**: Store multiple AI-generated content items per video (1 → many relationship)
 
-- Python 3.8+
-- FFmpeg (required for audio conversion)
+### Admin Dashboard
+- **Web-based UI**: Complete admin dashboard for all operations
+- **Video Management**: View, search, and filter all videos
+- **Transcript Viewing**: Browse and view transcripts with full-text search
+- **Bulk Operations**: Select multiple videos and perform batch operations
+- **Prompt Management**: Create, edit, and manage AI prompts
+- **User Management**: Create and manage admin users
+- **Settings Configuration**: Configure cookies, webhooks, and more
+
+### Database & Storage
+- **Dual Database Support**: SQLite (default) or PostgreSQL
+- **Unlimited Text Storage**: All large fields (transcripts, prompts, content) use TEXT type
+- **Metadata Storage**: Complete video metadata stored in structured and JSON format
+- **Content Relationships**: One video can have many generated content items
+
+### API Features
+- **RESTful API**: Complete REST API with automatic Swagger documentation
+- **Authentication**: Basic Auth and Bearer token support
+- **Advanced Filtering**: Filter videos by status, channel, date range, search terms
+- **Pagination**: Support for large datasets
+- **Bulk Endpoints**: Process multiple videos in single requests
+
+## 📋 Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [Usage](#usage)
+- [API Documentation](#api-documentation)
+- [Database Setup](#database-setup)
+- [Environment Variables](#environment-variables)
+- [Features Guide](#features-guide)
+- [Troubleshooting](#troubleshooting)
+- [Contributing](#contributing)
+
+## 🔧 Prerequisites
+
+- **Python 3.8+** (or Docker)
+- **FFmpeg** (for audio conversion)
   ```bash
   # Ubuntu/Debian
   sudo apt-get install ffmpeg
   
   # macOS
   brew install ffmpeg
+  
+  # Windows
+  # Download from https://ffmpeg.org/download.html
   ```
 
-## Installation
+- **API Keys** (required):
+  - **Deepgram API Key**: Get from [Deepgram Console](https://console.deepgram.com/)
+  - **OpenAI API Key** (optional, for AI features): Get from [OpenAI Platform](https://platform.openai.com/)
 
-1. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+- **PostgreSQL** (optional, if not using SQLite):
+  - PostgreSQL 12+ installed and running
 
-2. Set up environment variables:
-   ```bash
-   # Copy the example file
-   cp .env.example .env
-   
-   # Edit .env and add your Deepgram API key
-   # Optionally customize admin credentials
-   ```
-
-## Running the Service
+## 📦 Installation
 
 ### Option 1: Docker (Recommended)
 
-1. Build and run with Docker Compose:
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/yourusername/youtube-script.git
+   cd youtube-script
+   ```
+
+2. **Create `.env` file:**
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API keys
+   ```
+
+3. **Build and run:**
    ```bash
    docker-compose up -d
    ```
 
-2. Or build and run manually:
+4. **Access the service:**
+   - Admin Dashboard: http://localhost:8001
+   - API Docs: http://localhost:8001/docs
+   - Health Check: http://localhost:8001/health
+
+### Option 2: Local Installation
+
+1. **Clone the repository:**
    ```bash
-   docker build -t youtube-transcription .
-   docker run -d -p 8001:8001 -e DEEPGRAM_API_KEY=your-api-key youtube-transcription
+   git clone https://github.com/yourusername/youtube-script.git
+   cd youtube-script
    ```
 
-The service will be available at:
-- **Admin Dashboard**: http://localhost:8001
-- **API**: http://localhost:8001
-- **Interactive Docs**: http://localhost:8001/docs
-- **Health check**: http://localhost:8001/health
+2. **Create virtual environment (recommended):**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
-**Default Admin Credentials:**
-- Username: Set via `ADMIN_USERNAME` in `.env` (default: `admin`)
-- Password: Set via `ADMIN_PASSWORD` in `.env` (default: `admin`)
+3. **Install dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-⚠️ **Important**: Change the default admin password in production by updating `.env` file!
+4. **Create `.env` file:**
+   ```bash
+   cp .env.example .env
+   # Edit .env and configure your settings
+   ```
 
-### Option 2: Local Development
+5. **Run the service:**
+   ```bash
+   uvicorn main:app --reload --host 0.0.0.0 --port 8001
+   ```
 
-Start the FastAPI server:
+## ⚙️ Configuration
+
+### Environment Variables
+
+Create a `.env` file in the project root with the following variables:
+
 ```bash
-uvicorn main:app --reload --host 0.0.0.0 --port 8001
+# ============================================
+# Required API Keys
+# ============================================
+
+# Deepgram API Key (Required for transcription)
+DEEPGRAM_API_KEY=your-deepgram-api-key-here
+
+# OpenAI API Key (Required for AI content generation)
+OPENAI_API_KEY=your-openai-api-key-here
+
+# ============================================
+# Database Configuration
+# ============================================
+
+# Database Type: 'sqlite' (default) or 'postgres'
+DB_TYPE=sqlite
+
+# SQLite Configuration (if DB_TYPE=sqlite)
+SQLITE_PATH=youtube_transcriptions.db
+
+# PostgreSQL Configuration (if DB_TYPE=postgres)
+POSTGRES_HOST=localhost
+POSTGRES_PORT=5432
+POSTGRES_DB=youtube_transcriptions
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+
+# ============================================
+# YouTube Configuration
+# ============================================
+
+# YouTube Cookies (Optional but Recommended)
+# Helps bypass bot detection. Get cookies from browser and paste here.
+# Format: "name1=value1; name2=value2; ..."
+# See "Getting YouTube Cookies" section below
+YOUTUBE_COOKIES=
+
+# Alternative: Path to cookies file (Netscape format)
+# YOUTUBE_COOKIES_FILE=/path/to/cookies.txt
+
+# Alternative: Extract cookies from browser
+# YOUTUBE_COOKIES_BROWSER=chrome
+
+# Rate Limiting: Delay between YouTube requests (seconds)
+YOUTUBE_SLEEP_INTERVAL=2.0
+
+# ============================================
+# Server Configuration
+# ============================================
+
+# Server Port (default: 8001)
+PORT=8001
 ```
 
-The API will be available at:
-- **Admin Dashboard**: http://localhost:8001
-- **API**: http://localhost:8001
-- **Interactive Docs**: http://localhost:8001/docs
-- **Health check**: http://localhost:8001/health
+### Getting YouTube Cookies
 
-## Database
+YouTube cookies are **highly recommended** to avoid bot detection errors. Here's how to get them:
 
-The service uses SQLite to track all processed videos. The database file `youtube_transcriptions.db` is automatically created on first run.
+1. **Open YouTube in your browser** (logged in)
+2. **Open Developer Tools** (F12 or Right-click → Inspect)
+3. **Go to Network tab**
+4. **Visit any YouTube page** (e.g., https://www.youtube.com/@channelname)
+5. **Find a request to `youtube.com`** in the network list
+6. **Click on the request** → Go to **Headers** tab
+7. **Scroll down** to find the **`cookie:`** header
+8. **Copy the entire cookie value** (everything after "cookie: ")
+9. **Paste it in `.env`** as `YOUTUBE_COOKIES=...`
 
-**Database Schema:**
-- `video_id` - Unique YouTube video ID
-- `video_url` - Original URL if provided
-- `status` - Processing status: `processing`, `success`, or `failed`
-- `transcript` - Transcribed text (stored for successful transcriptions)
-- `audio_file_path` - Path to audio file (kept for failed attempts)
-- `error_message` - Error details for failed attempts
-- `created_at` / `updated_at` - Timestamps
+**Example:**
+```
+YOUTUBE_COOKIES="VISITOR_INFO1_LIVE=abc123; YSC=xyz789; PREF=..."
+```
 
-## API Usage
+## 🗄️ Database Setup
 
-### Transcribe Videos
+### SQLite (Default)
+
+SQLite is used by default and requires no setup. The database file is created automatically at `youtube_transcriptions.db`.
+
+**Advantages:**
+- No installation required
+- Perfect for development and small deployments
+- Single file database
+
+### PostgreSQL (Production)
+
+For production or multi-user environments, use PostgreSQL:
+
+1. **Install PostgreSQL:**
+   ```bash
+   # Ubuntu/Debian
+   sudo apt-get install postgresql postgresql-contrib
+   
+   # macOS
+   brew install postgresql
+   ```
+
+2. **Create database:**
+   ```bash
+   sudo -u postgres psql
+   CREATE DATABASE youtube_transcriptions;
+   CREATE USER your_user WITH PASSWORD 'your_password';
+   GRANT ALL PRIVILEGES ON DATABASE youtube_transcriptions TO your_user;
+   \q
+   ```
+
+3. **Update `.env`:**
+   ```bash
+   DB_TYPE=postgres
+   POSTGRES_HOST=localhost
+   POSTGRES_PORT=5432
+   POSTGRES_DB=youtube_transcriptions
+   POSTGRES_USER=your_user
+   POSTGRES_PASSWORD=your_password
+   ```
+
+4. **Install PostgreSQL driver:**
+   ```bash
+   pip install psycopg2-binary
+   ```
+
+The database schema is created automatically on first run.
+
+## 🎯 Usage
+
+### Admin Dashboard
+
+1. **Access the dashboard:**
+   - Navigate to http://localhost:8001
+   - Login with admin credentials (create first user via API or dashboard)
+
+2. **Features:**
+   - **Videos Tab**: View all videos, filter by status/channel, bulk operations
+   - **Transcripts Tab**: Browse processed videos with transcripts
+   - **Process Channel Tab**: Extract videos from YouTube channels
+   - **AI Processing Tab**: Generate content using OpenAI GPT
+   - **Prompts Tab**: Manage AI prompt templates
+   - **User Management Tab**: Create and manage admin users
+   - **Settings Tab**: Configure cookies, webhooks, and settings
+
+### API Usage
+
+#### 1. Transcribe Videos
 
 **Endpoint:** `POST /transcribe`
 
-**Request Body:**
-```json
-{
-  "videos": [
-    "dQw4w9WgXcQ",
-    "https://www.youtube.com/watch?v=VIDEO_ID_2",
-    "https://youtu.be/VIDEO_ID_3"
-  ],
-  "deepgram_api_key": "your-api-key"  // Optional if set as env var
-}
+```bash
+curl -X POST "http://localhost:8001/transcribe" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic <base64(username:password)>" \
+  -d '{
+    "videos": [
+      "dQw4w9WgXcQ",
+      "https://www.youtube.com/watch?v=VIDEO_ID_2"
+    ],
+    "deepgram_api_key": "your-key"  # Optional if set in .env
+  }'
 ```
-
-**Alternative formats (also supported):**
-```json
-{
-  "video_ids": ["VIDEO_ID_1", "VIDEO_ID_2"],
-  "video_urls": ["https://www.youtube.com/watch?v=VIDEO_ID_3"],
-  "deepgram_api_key": "your-api-key"
-}
-```
-
-**Note:** 
-- The `videos` field is recommended as it accepts both video IDs and URLs in a single field
-- You can also use `video_ids` or `video_urls` separately
-- The service automatically extracts video IDs from any YouTube URL format:
-  - `https://www.youtube.com/watch?v=VIDEO_ID`
-  - `https://youtu.be/VIDEO_ID`
-  - `https://www.youtube.com/embed/VIDEO_ID`
-  - `https://m.youtube.com/watch?v=VIDEO_ID`
-  - Or just the video ID: `VIDEO_ID`
 
 **Response:**
 ```json
 {
   "success": [
     {
-      "video_id": "VIDEO_ID_1",
-      "video_url": "https://www.youtube.com/watch?v=VIDEO_ID_1",
-      "transcript": "Full transcript text here...",
+      "video_id": "dQw4w9WgXcQ",
+      "video_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+      "transcript": "Full transcript text...",
       "status": "success",
       "from_cache": false
     }
   ],
-  "errors": [
-    {
-      "video_id": "VIDEO_ID_2",
-      "video_url": "https://www.youtube.com/watch?v=VIDEO_ID_2",
-      "error": "Error message",
-      "status": "error"
-    }
-  ]
+  "errors": []
 }
 ```
 
-**Response Fields:**
-- `from_cache`: `true` if transcript was retrieved from database (no re-processing)
-- `from_cache`: `false` if video was newly processed
+#### 2. Get Videos with Filters
 
-### Get Video Status
+**Endpoint:** `GET /api/videos`
 
-**Endpoint:** `GET /video/{video_id}`
-
-Get the status and transcript of a specific video.
-
-**Response:**
-```json
-{
-  "video_id": "VIDEO_ID",
-  "video_url": "https://www.youtube.com/watch?v=VIDEO_ID",
-  "status": "success",
-  "transcript": "Full transcript...",
-  "error_message": null,
-  "created_at": "2024-01-01 12:00:00",
-  "updated_at": "2024-01-01 12:05:00"
-}
+```bash
+curl -X GET "http://localhost:8001/api/videos?status=processed&channel=ChannelName&limit=10" \
+  -H "Authorization: Basic <base64(username:password)>"
 ```
 
-### Example with cURL
+**Query Parameters:**
+- `status`: Filter by status (pending, processing, processed, failed, rate_limited)
+- `channel`: Filter by exact channel name
+- `search`: Search in video_id, title, or channel_name
+- `date_from`: Filter from date (YYYY-MM-DD)
+- `date_to`: Filter to date (YYYY-MM-DD)
+- `limit`: Maximum results
+- `offset`: Pagination offset
 
-**Using videos field (recommended - accepts both IDs and URLs):**
+#### 3. Extract Channel Videos
+
+**Endpoint:** `POST /channel/videos`
+
 ```bash
-curl -X POST "http://localhost:8000/transcribe" \
+curl -X POST "http://localhost:8001/channel/videos" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Basic <base64(username:password)>" \
   -d '{
-    "videos": [
-      "dQw4w9WgXcQ",
-      "https://www.youtube.com/watch?v=VIDEO_ID_2",
-      "https://youtu.be/VIDEO_ID_3"
-    ],
-    "deepgram_api_key": "your-api-key"
+    "channel_url": "https://www.youtube.com/@channelname",
+    "max_results": 50
   }'
 ```
 
-**Using video_ids (also accepts URLs):**
+#### 4. Generate AI Content
+
+**Endpoint:** `POST /api/ai/process`
+
 ```bash
-curl -X POST "http://localhost:8000/transcribe" \
+curl -X POST "http://localhost:8001/api/ai/process" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Basic <base64(username:password)>" \
   -d '{
-    "video_ids": ["dQw4w9WgXcQ"],
-    "deepgram_api_key": "your-api-key"
+    "prompt": "Summarize the following transcript: {transcript}",
+    "prompt_variables": {
+      "transcript": "Video transcript here..."
+    },
+    "model": "gpt-3.5-turbo",
+    "temperature": 0.7,
+    "max_tokens": 1000
   }'
 ```
 
-**Using video_urls:**
+#### 5. Bulk Operations
+
+**Bulk Transcribe:**
 ```bash
-curl -X POST "http://localhost:8000/transcribe" \
+curl -X POST "http://localhost:8001/api/bulk/transcribe" \
   -H "Content-Type: application/json" \
+  -H "Authorization: Basic <base64(username:password)>" \
   -d '{
-    "video_urls": ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"],
-    "deepgram_api_key": "your-api-key"
+    "video_ids": ["VIDEO_ID_1", "VIDEO_ID_2", "VIDEO_ID_3"]
   }'
 ```
 
-**Get video status:**
+**Bulk Generate Content:**
 ```bash
-curl "http://localhost:8000/video/dQw4w9WgXcQ"
+curl -X POST "http://localhost:8001/api/bulk/generate-content" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Basic <base64(username:password)>" \
+  -d '{
+    "video_ids": ["VIDEO_ID_1", "VIDEO_ID_2"],
+    "prompt_id": 1,
+    "model": "gpt-3.5-turbo"
+  }'
 ```
 
-### Example with Python
+### Python Example
 
 ```python
 import requests
+from requests.auth import HTTPBasicAuth
 
-url = "http://localhost:8000/transcribe"
+# Base URL
+BASE_URL = "http://localhost:8001"
 
-# Using videos field (recommended - accepts both IDs and URLs)
-payload = {
-    "videos": [
-        "dQw4w9WgXcQ",
-        "https://www.youtube.com/watch?v=VIDEO_ID_2",
-        "https://youtu.be/VIDEO_ID_3"
-    ],
-    "deepgram_api_key": "your-api-key"
-}
+# Authentication
+auth = HTTPBasicAuth("admin", "admin")
 
-# Or using separate fields
-payload = {
-    "video_ids": ["dQw4w9WgXcQ"],
-    "video_urls": ["https://www.youtube.com/watch?v=VIDEO_ID_2"],
-    "deepgram_api_key": "your-api-key"
-}
-
-response = requests.post(url, json=payload)
+# 1. Transcribe a video
+response = requests.post(
+    f"{BASE_URL}/transcribe",
+    json={
+        "videos": ["dQw4w9WgXcQ"],
+        "deepgram_api_key": "your-key"
+    },
+    auth=auth
+)
 result = response.json()
+print(f"Transcript: {result['success'][0]['transcript']}")
 
-# Check cached vs new transcripts
-for item in result["success"]:
-    if item["from_cache"]:
-        print(f"Video {item['video_id']} - Retrieved from cache")
-    else:
-        print(f"Video {item['video_id']} - Newly processed")
+# 2. Get videos with filters
+response = requests.get(
+    f"{BASE_URL}/api/videos",
+    params={"status": "processed", "limit": 10},
+    auth=auth
+)
+videos = response.json()
+print(f"Found {videos['total']} videos")
+
+# 3. Generate AI content
+response = requests.post(
+    f"{BASE_URL}/api/ai/process",
+    json={
+        "prompt": "Summarize: {transcript}",
+        "prompt_variables": {"transcript": "Video transcript..."},
+        "model": "gpt-3.5-turbo"
+    },
+    auth=auth
+)
+content = response.json()
+print(f"Generated: {content['response']}")
 ```
 
-## Behavior
+## 📚 API Documentation
 
-### Successful Processing
-1. Video is checked in database
-2. If transcript exists → Return cached transcript (no download/transcription)
-3. If not found → Download audio → Transcribe → Store in database → **Delete audio file**
-4. Return transcript
+### Interactive API Docs
 
-### Failed Processing
-1. Video is checked in database
-2. If status is `failed` → Return error (no re-download)
-3. If processing fails → Store failure status → **Keep audio file** for potential retry
-4. Return error
+Once the service is running, access the interactive API documentation:
 
-### Status Tracking
-- **`processing`**: Video is being processed
-- **`success`**: Transcript successfully generated and stored
-- **`failed`**: Processing failed (audio file may be retained)
+- **Swagger UI**: http://localhost:8001/docs
+- **ReDoc**: http://localhost:8001/redoc
 
-## Admin Dashboard
+All endpoints include detailed descriptions, parameters, request/response examples, and use cases.
 
-Access the admin dashboard at `http://localhost:8001` (or your configured port).
+### Main Endpoints
 
-**Features:**
-- View all processed videos with their status
-- Search and filter videos
-- View full transcripts
-- Monitor statistics (total, success, failed, processing)
-- Real-time updates (auto-refreshes every 30 seconds)
+#### Video Operations
+- `POST /transcribe` - Transcribe YouTube videos
+- `GET /video/{video_id}` - Get video information and transcript
+- `POST /channel/videos` - Extract videos from YouTube channel
+- `GET /channel/videos` - Extract videos (GET method)
 
-**Login:**
-- Default username: `admin`
-- Default password: `admin`
+#### Video Management
+- `GET /api/videos` - Get videos with advanced filtering
+- `GET /api/admin/videos` - Get all videos (admin)
+- `GET /api/admin/stats` - Get video statistics
+- `POST /api/channel/process` - Process entire channel
 
-## Environment Variables
+#### Transcripts
+- `GET /api/transcripts` - Get transcripts with filtering
 
-The service uses a `.env` file for configuration. Create a `.env` file in the project root:
+#### AI Processing
+- `POST /api/ai/process` - Process prompt with OpenAI GPT
+
+#### Prompt Management
+- `GET /api/prompts` - List all prompts
+- `GET /api/prompts/{id}` - Get prompt by ID
+- `POST /api/prompts` - Create new prompt
+- `PUT /api/prompts/{id}` - Update prompt
+- `DELETE /api/prompts/{id}` - Delete prompt
+
+#### Bulk Operations
+- `POST /api/bulk/transcribe` - Bulk transcribe videos
+- `POST /api/bulk/generate-content` - Bulk generate AI content
+- `POST /api/bulk/get-data` - Bulk get video data
+
+#### Generated Content
+- `GET /api/videos/{video_id}/generated-content` - Get all content for video
+- `GET /api/generated-content/{id}` - Get content by ID
+- `GET /api/generated-content` - List all generated content
+- `DELETE /api/generated-content/{id}` - Delete generated content
+
+#### User Management
+- `GET /api/admin/users` - List all users
+- `POST /api/admin/users` - Create user
+- `DELETE /api/admin/users/{username}` - Delete user
+
+#### Settings
+- `GET /api/admin/settings/{key}` - Get setting
+- `POST /api/admin/settings/{key}` - Set setting
+- `GET /api/admin/cookies` - Get YouTube cookies
+- `POST /api/admin/cookies` - Set YouTube cookies
+- `DELETE /api/admin/cookies` - Delete cookies
+
+#### Utilities
+- `POST /api/extract-video-ids` - Extract video IDs from HTML
+- `GET /health` - Health check
+
+#### Authentication
+- `POST /api/login` - Admin login
+- `POST /api/logout` - Logout
+- `POST /api/change-password` - Change password
+
+## 🔐 Authentication
+
+All API endpoints require authentication. Two methods are supported:
+
+### 1. Basic Authentication (Recommended for API)
 
 ```bash
-# Copy the example file
-cp .env.example .env
-
-# Edit .env and configure your settings
+curl -X GET "http://localhost:8001/api/videos" \
+  -u "username:password"
 ```
 
-**Example `.env` file:**
+Or in Python:
+```python
+import requests
+requests.get("http://localhost:8001/api/videos", auth=("username", "password"))
+```
+
+### 2. Bearer Token (For Dashboard Sessions)
+
+1. **Login to get token:**
+   ```bash
+   curl -X POST "http://localhost:8001/api/login" \
+     -H "Content-Type: application/json" \
+     -d '{"username": "admin", "password": "admin"}'
+   ```
+
+2. **Use token in requests:**
+   ```bash
+   curl -X GET "http://localhost:8001/api/videos" \
+     -H "Authorization: Bearer <token>"
+   ```
+
+## 🎨 Features Guide
+
+### Bulk Video Operations
+
+1. **Select Videos:**
+   - Go to Videos tab
+   - Check boxes next to videos you want to process
+   - Use "Select All" checkbox for all videos
+
+2. **Perform Actions:**
+   - **Get Data**: Retrieve metadata for selected videos
+   - **Transcribe**: Transcribe selected videos
+   - **Generate Content**: Generate AI content for selected videos
+
+### Prompt Management
+
+1. **Create Prompt:**
+   - Go to Prompts tab
+   - Click "Create New Prompt"
+   - Fill in:
+     - Name (required)
+     - Description (optional)
+     - System Prompt (AI instructions)
+     - User Prompt Template (with {variables})
+     - Operation Type (category)
+
+2. **Use Variables:**
+   - In user prompt template, use `{variable_name}`
+   - Available variables: `{video_id}`, `{video_title}`, `{channel_name}`, `{transcript}`, `{duration}`, `{view_count}`
+   - Variables are automatically replaced when using the prompt
+
+3. **Example Prompt:**
+   ```
+   System Prompt: "You are a helpful assistant that summarizes video content."
+   
+   User Template: "Summarize this video transcript:\n\nTitle: {video_title}\nChannel: {channel_name}\nTranscript: {transcript}"
+   ```
+
+### AI Content Generation
+
+1. **Using Saved Prompt:**
+   - Go to AI Processing tab
+   - Select a saved prompt from dropdown
+   - Click "Process with AI"
+
+2. **Using Custom Prompt:**
+   - Enter custom prompt in text area
+   - Optionally save it for later use
+   - Click "Process with AI"
+
+3. **View Generated Content:**
+   - Go to Videos tab
+   - Click "View Content" button for any video
+   - See all generated content items for that video
+   - Delete individual content items if needed
+
+### Channel Processing
+
+1. **Extract Videos:**
+   - Go to Process Channel tab
+   - Enter YouTube channel URL
+   - Click "Submit Channel"
+   - Videos are stored with "pending" status
+
+2. **Process Extracted Videos:**
+   - Use bulk operations to transcribe pending videos
+   - Or use `/api/channel/process` endpoint for automatic processing
+
+3. **HTML Extraction (Alternative):**
+   - If channel API doesn't work, use HTML extraction
+   - Paste HTML from YouTube page
+   - Extract video IDs
+   - Process extracted videos
+
+## 🗃️ Database Schema
+
+### Tables
+
+#### `video_transcriptions`
+Stores video information and transcripts.
+
+**Fields:**
+- `id` - Primary key
+- `video_id` - YouTube video ID (unique)
+- `video_url` - Original URL
+- `status` - Processing status (pending, processing, processed, failed, rate_limited)
+- `transcript` - Full transcript text (TEXT, unlimited size)
+- `title` - Video title
+- `duration` - Video duration in seconds
+- `view_count` - Number of views
+- `upload_date` - Upload date
+- `channel_name` - Channel/author name
+- `channel_id` - Channel ID
+- `metadata` - Complete metadata as JSON
+- `error_message` - Error details if failed
+- `created_at` / `updated_at` - Timestamps
+
+#### `prompts`
+Stores AI prompt templates.
+
+**Fields:**
+- `id` - Primary key
+- `name` - Prompt name
+- `description` - Description
+- `system_prompt` - System prompt (TEXT, unlimited)
+- `user_prompt_template` - User template with variables (TEXT, unlimited)
+- `operation_type` - Category (e.g., 'summarize', 'extract_keywords')
+- `created_at` / `updated_at` - Timestamps
+
+#### `generated_content`
+Stores AI-generated content (1 video → many content items).
+
+**Fields:**
+- `id` - Primary key
+- `video_id` - Foreign key to video_transcriptions
+- `prompt_id` - Foreign key to prompts (optional)
+- `prompt_text` - Prompt used (TEXT, unlimited)
+- `model` - OpenAI model used
+- `temperature` - Temperature setting
+- `max_tokens` - Max tokens setting
+- `generated_text` - Generated content (TEXT, unlimited)
+- `usage_info` - Token usage statistics (JSON)
+- `created_at` - Timestamp
+
+#### `admin_users`
+Stores admin user accounts.
+
+**Fields:**
+- `id` - Primary key
+- `username` - Username (unique)
+- `password_hash` - Hashed password
+- `created_at` - Timestamp
+
+#### `settings`
+Stores key-value settings.
+
+**Fields:**
+- `id` - Primary key
+- `setting_key` - Setting name (unique)
+- `setting_value` - Setting value (TEXT)
+- `updated_at` - Timestamp
+
+## 🐛 Troubleshooting
+
+### Common Issues
+
+#### 1. "Sign in to confirm you're not a bot" Error
+
+**Problem:** YouTube is blocking requests.
+
+**Solution:**
+- Configure YouTube cookies (see "Getting YouTube Cookies" section)
+- Add cookies to `.env` file or via admin dashboard
+- Ensure cookies are from a logged-in YouTube session
+
+#### 2. Rate Limiting Errors
+
+**Problem:** "The current session has been rate-limited by YouTube"
+
+**Solution:**
+- Increase `YOUTUBE_SLEEP_INTERVAL` in `.env` (default: 2 seconds)
+- Wait before retrying (rate limits typically last 1 hour)
+- Use cookies to reduce rate limiting
+- Videos marked as `rate_limited` will be retried on next run
+
+#### 3. Database Connection Errors (PostgreSQL)
+
+**Problem:** Cannot connect to PostgreSQL
+
+**Solution:**
+- Verify PostgreSQL is running: `sudo systemctl status postgresql`
+- Check connection settings in `.env`
+- Ensure database and user exist
+- For Docker, use `network_mode: host` in docker-compose.yml
+
+#### 4. FFmpeg Not Found
+
+**Problem:** "ffmpeg: command not found"
+
+**Solution:**
+- Install FFmpeg (see Prerequisites)
+- For Docker, FFmpeg is included in the image
+- Verify installation: `ffmpeg -version`
+
+#### 5. API Key Errors
+
+**Problem:** "API key is required"
+
+**Solution:**
+- Set `DEEPGRAM_API_KEY` in `.env` file
+- Or provide API key in request body
+- For OpenAI features, set `OPENAI_API_KEY` in `.env`
+
+#### 6. Port Already in Use
+
+**Problem:** "Address already in use"
+
+**Solution:**
+- Change port in `.env`: `PORT=8002`
+- Or stop the service using port 8001
+- Update docker-compose.yml if using Docker
+
+## 📝 Development
+
+### Project Structure
+
+```
+youtube-script/
+├── main.py                 # FastAPI application and endpoints
+├── database.py             # Database operations and schema
+├── auth.py                 # Authentication and session management
+├── download_audio.py       # Audio download utilities (if separate)
+├── email_service.py        # Email sending functionality
+├── requirements.txt        # Python dependencies
+├── Dockerfile              # Docker image definition
+├── docker-compose.yml      # Docker Compose configuration
+├── static/                 # Frontend files
+│   ├── admin.html         # Admin dashboard HTML
+│   ├── admin.js           # Frontend JavaScript
+│   └── admin.css          # Styles
+└── README.md              # This file
+```
+
+### Running Tests
+
 ```bash
-# Deepgram API Key
-DEEPGRAM_API_KEY=your-deepgram-api-key-here
+# Install test dependencies
+pip install pytest pytest-asyncio httpx
 
-# Default Admin User Credentials
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin
-
-# YouTube Cookies (Optional - helps bypass bot detection)
-# Option 1: Use cookies file (recommended)
-YOUTUBE_COOKIES_FILE=/path/to/cookies.txt
-
-# Option 2: Extract from browser (requires browser_cookie3)
-# YOUTUBE_COOKIES_BROWSER=chrome
+# Run tests (if available)
+pytest
 ```
 
-**Environment Variables:**
-- `DEEPGRAM_API_KEY`: Deepgram API key (required) - Get from https://console.deepgram.com/
-- `ADMIN_USERNAME`: Default admin username (default: `admin`)
-- `ADMIN_PASSWORD`: Default admin password (default: `admin`)
+### Code Style
 
-**YouTube Cookies (Optional but Recommended):**
-If you're getting "Sign in to confirm you're not a bot" errors from YouTube, configure cookies:
+The project follows PEP 8 Python style guidelines. Consider using:
+- `black` for code formatting
+- `flake8` for linting
+- `mypy` for type checking
 
-- `YOUTUBE_COOKIES_FILE`: Path to cookies file in Netscape format (e.g., `/path/to/cookies.txt`)
-  - Export cookies from your browser using extensions like "Get cookies.txt LOCALLY" or "cookies.txt"
-  - Export cookies from youtube.com in Netscape format
-  - Save the file and set this variable to the file path
+## 🤝 Contributing
 
-- `YOUTUBE_COOKIES_BROWSER`: Browser to extract cookies from (e.g., `chrome`, `firefox`, `edge`, `safari`)
-  - Requires `browser_cookie3` package: `pip install browser_cookie3`
-  - Automatically extracts cookies from your browser
+Contributions are welcome! Please follow these steps:
 
-**Note:** Cookies help bypass YouTube's bot detection. Without cookies, you may encounter rate limiting or blocking.
+1. **Fork the repository**
+2. **Create a feature branch:** `git checkout -b feature/amazing-feature`
+3. **Make your changes**
+4. **Test thoroughly**
+5. **Commit your changes:** `git commit -m 'Add amazing feature'`
+6. **Push to the branch:** `git push origin feature/amazing-feature`
+7. **Open a Pull Request**
 
-**Database Configuration:**
-- `DB_TYPE`: Database type - `sqlite` (default) or `postgres`
+### Development Setup
 
-**For SQLite (default):**
-- `SQLITE_PATH`: Path to SQLite database file (default: `youtube_transcriptions.db`)
+1. Clone your fork
+2. Create virtual environment
+3. Install dependencies: `pip install -r requirements.txt`
+4. Create `.env` file with your API keys
+5. Run locally: `uvicorn main:app --reload`
 
-**For PostgreSQL:**
-- `POSTGRES_HOST`: PostgreSQL host (default: `localhost`)
-- `POSTGRES_PORT`: PostgreSQL port (default: `5432`)
-- `POSTGRES_DB`: Database name (default: `youtube_transcriptions`)
-- `POSTGRES_USER`: PostgreSQL username (default: `postgres`)
-- `POSTGRES_PASSWORD`: PostgreSQL password (default: `postgres`)
+## 📄 License
 
-**Email Configuration (Optional - for sending results):**
-- `SMTP_HOST`: SMTP server host (default: `smtp.gmail.com`)
-- `SMTP_PORT`: SMTP server port (default: `587`)
-- `SMTP_USER`: SMTP username/email
-- `SMTP_PASSWORD`: SMTP password (use app password for Gmail)
-- `SMTP_FROM_EMAIL`: From email address (defaults to `SMTP_USER`)
-- `SMTP_USE_TLS`: Use TLS encryption (default: `true`)
+This project is open source. Please check the LICENSE file for details.
 
-**API Key Configuration (Optional - for API authentication):**
-**Authentication:**
-- All API endpoints require Basic Auth (username:password) or Bearer token
-- Basic Auth is recommended for external API access and third-party integrations
-- Bearer token is used for dashboard sessions
-  - If not set, only Bearer token authentication is available
+## 🆘 Support
 
-**Note:** 
-- The `.env` file is automatically loaded when the application starts
-- For Docker, the `.env` file is automatically loaded via `docker-compose.yml`
-- You can still provide the API key in the request body as an alternative
-- **Important**: Change the default admin password in production!
-- The default admin user is created automatically on first run using these credentials
-- The database type is determined by `DB_TYPE` environment variable
-- Email functionality is optional - if not configured, the service will work but won't send emails
+- **Issues**: Report bugs or request features on GitHub Issues
+- **Documentation**: Check `/docs` endpoint for interactive API documentation
+- **Email**: [Your email if applicable]
 
-## Notes
+## 🙏 Acknowledgments
 
-- Audio files are **only deleted after successful transcription**
-- Failed attempts keep audio files for potential retry
-- Transcripts are cached in database to avoid re-processing
-- Failed videos are tracked to prevent unnecessary re-downloads
-- The service uses Deepgram's `nova-2` model with smart formatting enabled
-- Currently configured for English language transcription (can be modified in code)
-- Database file (`youtube_transcriptions.db`) is created automatically
+- [FastAPI](https://fastapi.tiangolo.com/) - Modern web framework
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) - YouTube video downloader
+- [Deepgram](https://www.deepgram.com/) - Speech-to-text API
+- [OpenAI](https://openai.com/) - GPT models for content generation
+
+## 📊 Status
+
+- ✅ Video transcription
+- ✅ Channel processing
+- ✅ AI content generation
+- ✅ Prompt management
+- ✅ Bulk operations
+- ✅ Admin dashboard
+- ✅ Database storage
+- ✅ API documentation
+
+---
+
+**Made with ❤️ for the open source community**

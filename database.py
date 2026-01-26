@@ -172,6 +172,46 @@ def init_database():
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            
+            # Prompts table
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS prompts (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    system_prompt TEXT,
+                    user_prompt_template TEXT,
+                    operation_type VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_prompts_operation_type ON prompts(operation_type)
+            """)
+            
+            # Generated content table (1 video -> many content items)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS generated_content (
+                    id SERIAL PRIMARY KEY,
+                    video_id VARCHAR(255) NOT NULL,
+                    prompt_id INTEGER,
+                    prompt_text TEXT,
+                    model VARCHAR(100),
+                    temperature FLOAT,
+                    max_tokens INTEGER,
+                    generated_text TEXT NOT NULL,
+                    usage_info JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (video_id) REFERENCES video_transcriptions(video_id) ON DELETE CASCADE
+                )
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_content_video_id ON generated_content(video_id)
+            """)
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_content_prompt_id ON generated_content(prompt_id)
+            """)
             cursor.close()
         else:  # SQLite
             conn.execute("""
@@ -219,6 +259,46 @@ def init_database():
                     setting_value TEXT,
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
+            """)
+            
+            # Prompts table
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS prompts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    description TEXT,
+                    system_prompt TEXT,
+                    user_prompt_template TEXT,
+                    operation_type TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_prompts_operation_type ON prompts(operation_type)
+            """)
+            
+            # Generated content table (1 video -> many content items)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS generated_content (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    video_id TEXT NOT NULL,
+                    prompt_id INTEGER,
+                    prompt_text TEXT,
+                    model TEXT,
+                    temperature REAL,
+                    max_tokens INTEGER,
+                    generated_text TEXT NOT NULL,
+                    usage_info TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (video_id) REFERENCES video_transcriptions(video_id) ON DELETE CASCADE
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_content_video_id ON generated_content(video_id)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_generated_content_prompt_id ON generated_content(prompt_id)
             """)
         
         # Add metadata columns if they don't exist (migration for existing databases)
@@ -512,3 +592,242 @@ def set_setting(setting_key: str, setting_value: str) -> bool:
     except Exception as e:
         print(f"Error setting setting: {e}")
         return False
+
+
+# Prompt management functions
+def get_all_prompts(operation_type: Optional[str] = None) -> list:
+    """Get all prompts, optionally filtered by operation_type."""
+    with get_db_connection() as conn:
+        if operation_type:
+            if DB_TYPE == "postgres":
+                prompts = fetch_all(conn, "SELECT * FROM prompts WHERE operation_type = %s ORDER BY created_at DESC", (operation_type,))
+            else:
+                prompts = fetch_all(conn, "SELECT * FROM prompts WHERE operation_type = ? ORDER BY created_at DESC", (operation_type,))
+        else:
+            prompts = fetch_all(conn, "SELECT * FROM prompts ORDER BY created_at DESC")
+        return prompts
+
+
+def get_prompt(prompt_id: int) -> Optional[Dict]:
+    """Get a prompt by ID."""
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            return fetch_one(conn, "SELECT * FROM prompts WHERE id = %s", (prompt_id,))
+        else:
+            return fetch_one(conn, "SELECT * FROM prompts WHERE id = ?", (prompt_id,))
+
+
+def create_prompt(name: str, description: Optional[str] = None, system_prompt: Optional[str] = None, 
+                  user_prompt_template: Optional[str] = None, operation_type: Optional[str] = None) -> int:
+    """Create a new prompt and return its ID."""
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO prompts (name, description, system_prompt, user_prompt_template, operation_type, created_at, updated_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (name, description, system_prompt, user_prompt_template, operation_type, datetime.now(), datetime.now()))
+            prompt_id = cursor.fetchone()[0]
+            cursor.close()
+        else:  # SQLite
+            cursor = conn.execute("""
+                INSERT INTO prompts (name, description, system_prompt, user_prompt_template, operation_type, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (name, description, system_prompt, user_prompt_template, operation_type, datetime.now(), datetime.now()))
+            prompt_id = cursor.lastrowid
+        return prompt_id
+
+
+def update_prompt(prompt_id: int, name: Optional[str] = None, description: Optional[str] = None,
+                  system_prompt: Optional[str] = None, user_prompt_template: Optional[str] = None,
+                  operation_type: Optional[str] = None) -> bool:
+    """Update a prompt."""
+    updates = []
+    params = []
+    
+    if name is not None:
+        updates.append("name = %s" if DB_TYPE == "postgres" else "name = ?")
+        params.append(name)
+    if description is not None:
+        updates.append("description = %s" if DB_TYPE == "postgres" else "description = ?")
+        params.append(description)
+    if system_prompt is not None:
+        updates.append("system_prompt = %s" if DB_TYPE == "postgres" else "system_prompt = ?")
+        params.append(system_prompt)
+    if user_prompt_template is not None:
+        updates.append("user_prompt_template = %s" if DB_TYPE == "postgres" else "user_prompt_template = ?")
+        params.append(user_prompt_template)
+    if operation_type is not None:
+        updates.append("operation_type = %s" if DB_TYPE == "postgres" else "operation_type = ?")
+        params.append(operation_type)
+    
+    if not updates:
+        return False
+    
+    updates.append("updated_at = %s" if DB_TYPE == "postgres" else "updated_at = ?")
+    params.append(datetime.now())
+    params.append(prompt_id)
+    
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                query = f"UPDATE prompts SET {', '.join(updates)} WHERE id = %s"
+                cursor.execute(query, params)
+                cursor.close()
+            else:  # SQLite
+                query = f"UPDATE prompts SET {', '.join(updates)} WHERE id = ?"
+                conn.execute(query, params)
+        return True
+    except Exception as e:
+        print(f"Error updating prompt: {e}")
+        return False
+
+
+def delete_prompt(prompt_id: int) -> bool:
+    """Delete a prompt by ID."""
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM prompts WHERE id = %s", (prompt_id,))
+                cursor.close()
+            else:  # SQLite
+                conn.execute("DELETE FROM prompts WHERE id = ?", (prompt_id,))
+        return True
+    except Exception as e:
+        print(f"Error deleting prompt: {e}")
+        return False
+
+
+# Generated Content Management Functions
+def create_generated_content(
+    video_id: str,
+    generated_text: str,
+    prompt_id: Optional[int] = None,
+    prompt_text: Optional[str] = None,
+    model: Optional[str] = None,
+    temperature: Optional[float] = None,
+    max_tokens: Optional[int] = None,
+    usage_info: Optional[dict] = None
+) -> int:
+    """Create a new generated content record and return its ID."""
+    import json
+    
+    usage_json = json.dumps(usage_info) if usage_info else None
+    
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO generated_content 
+                (video_id, prompt_id, prompt_text, model, temperature, max_tokens, generated_text, usage_info, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id
+            """, (video_id, prompt_id, prompt_text, model, temperature, max_tokens, generated_text, usage_json, datetime.now()))
+            content_id = cursor.fetchone()[0]
+            cursor.close()
+        else:  # SQLite
+            cursor = conn.execute("""
+                INSERT INTO generated_content 
+                (video_id, prompt_id, prompt_text, model, temperature, max_tokens, generated_text, usage_info, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (video_id, prompt_id, prompt_text, model, temperature, max_tokens, generated_text, usage_json, datetime.now()))
+            content_id = cursor.lastrowid
+        return content_id
+
+
+def get_generated_content_by_video(video_id: str) -> list:
+    """Get all generated content for a specific video."""
+    import json
+    
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            contents = fetch_all(conn, """
+                SELECT * FROM generated_content 
+                WHERE video_id = %s 
+                ORDER BY created_at DESC
+            """, (video_id,))
+        else:
+            contents = fetch_all(conn, """
+                SELECT * FROM generated_content 
+                WHERE video_id = ? 
+                ORDER BY created_at DESC
+            """, (video_id,))
+        
+        # Parse JSON usage_info
+        for content in contents:
+            if content.get('usage_info'):
+                try:
+                    if isinstance(content['usage_info'], str):
+                        content['usage_info'] = json.loads(content['usage_info'])
+                except (json.JSONDecodeError, TypeError):
+                    content['usage_info'] = None
+        
+        return contents
+
+
+def get_generated_content(content_id: int) -> Optional[Dict]:
+    """Get a specific generated content by ID."""
+    import json
+    
+    with get_db_connection() as conn:
+        if DB_TYPE == "postgres":
+            content = fetch_one(conn, "SELECT * FROM generated_content WHERE id = %s", (content_id,))
+        else:
+            content = fetch_one(conn, "SELECT * FROM generated_content WHERE id = ?", (content_id,))
+        
+        if content and content.get('usage_info'):
+            try:
+                if isinstance(content['usage_info'], str):
+                    content['usage_info'] = json.loads(content['usage_info'])
+            except (json.JSONDecodeError, TypeError):
+                content['usage_info'] = None
+        
+        return content
+
+
+def delete_generated_content(content_id: int) -> bool:
+    """Delete a generated content by ID."""
+    try:
+        with get_db_connection() as conn:
+            if DB_TYPE == "postgres":
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM generated_content WHERE id = %s", (content_id,))
+                cursor.close()
+            else:  # SQLite
+                conn.execute("DELETE FROM generated_content WHERE id = ?", (content_id,))
+        return True
+    except Exception as e:
+        print(f"Error deleting generated content: {e}")
+        return False
+
+
+def get_all_generated_content(limit: Optional[int] = None, offset: Optional[int] = None) -> list:
+    """Get all generated content, optionally with pagination."""
+    import json
+    
+    query = "SELECT * FROM generated_content ORDER BY created_at DESC"
+    params = []
+    
+    if limit:
+        query += " LIMIT %s" if DB_TYPE == "postgres" else " LIMIT ?"
+        params.append(limit)
+        if offset:
+            query += " OFFSET %s" if DB_TYPE == "postgres" else " OFFSET ?"
+            params.append(offset)
+    
+    with get_db_connection() as conn:
+        contents = fetch_all(conn, query, tuple(params) if params else None)
+        
+        # Parse JSON usage_info
+        for content in contents:
+            if content.get('usage_info'):
+                try:
+                    if isinstance(content['usage_info'], str):
+                        content['usage_info'] = json.loads(content['usage_info'])
+                except (json.JSONDecodeError, TypeError):
+                    content['usage_info'] = None
+        
+        return contents

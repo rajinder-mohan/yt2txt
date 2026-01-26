@@ -313,6 +313,38 @@ tbody tr:hover {
     margin-top: 1rem;
     line-height: 1.6;
     white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-height: 60vh;
+    overflow-y: auto;
+}
+
+/* Generated Content Modal - Large Text Support */
+#generatedContentModal .modal-content {
+    max-width: 90%;
+    max-height: 90vh;
+    overflow-y: auto;
+}
+
+#generatedContentList {
+    max-height: 70vh;
+    overflow-y: auto;
+}
+
+/* Large text areas in forms */
+textarea {
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    white-space: pre-wrap;
+}
+
+/* Ensure all large text content is properly wrapped */
+.generated-content-text {
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    max-height: 400px;
+    overflow-y: auto;
 }
 
 /* Channel Submission Section */

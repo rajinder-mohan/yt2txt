@@ -13,6 +13,7 @@ import asyncio
 from urllib.parse import unquote
 from dotenv import load_dotenv
 from deepgram import DeepgramClient
+from openai import OpenAI
 from database import (
     init_database,
     get_video_record,
@@ -22,7 +23,17 @@ from database import (
     get_all_videos,
     get_stats,
     get_setting,
-    set_setting
+    set_setting,
+    get_all_prompts,
+    get_prompt,
+    create_prompt,
+    update_prompt,
+    delete_prompt,
+    create_generated_content,
+    get_generated_content_by_video,
+    get_generated_content,
+    delete_generated_content,
+    get_all_generated_content
 )
 from auth import authenticate_user, create_session, delete_session, get_current_user, authenticate_api_request, update_user_password, active_sessions
 from email_service import send_channel_processing_results
@@ -39,13 +50,32 @@ app = FastAPI(
     title="YouTube Audio Transcription Service", 
     version="1.0.0",
     description="""
-    YouTube Audio Transcription Service API.
+    **YouTube Audio Transcription Service API**
     
-    **Authentication:**
-    - Use Basic Auth (username:password) for all API endpoints
-    - Bearer token authentication is also supported for dashboard sessions
+    Complete API for downloading YouTube videos, transcribing audio, managing prompts, and generating AI content.
     
-    All API endpoints require authentication.
+    ## Features
+    
+    - **Video Processing**: Download audio, extract metadata, transcribe videos
+    - **Channel Management**: Extract videos from YouTube channels with pagination
+    - **AI Integration**: Generate content using OpenAI GPT models
+    - **Prompt Management**: Store and reuse AI prompts with variable templates
+    - **Bulk Operations**: Process multiple videos simultaneously
+    - **Content Storage**: Store transcripts and AI-generated content (1 video → many content items)
+    
+    ## Authentication
+    
+    All API endpoints require authentication using one of these methods:
+    - **Basic Auth**: Username and password (recommended for API calls)
+    - **Bearer Token**: Session token from login endpoint (for dashboard sessions)
+    
+    ## Database
+    
+    Supports both PostgreSQL and SQLite databases. All large text fields (transcripts, prompts, generated content) use TEXT type for unlimited storage.
+    
+    ## Rate Limiting
+    
+    Built-in rate limiting protection for YouTube requests. Automatically handles bot detection and rate limit errors.
     """
 )
 
@@ -493,22 +523,35 @@ def transcribe_audio(audio_file_path: str, api_key: str) -> str:
 @app.post("/transcribe", response_model=TranscriptionResponse)
 async def transcribe_videos(request: VideoRequest):
     """
-    Download audio from YouTube videos and transcribe them using Deepgram.
+    **Transcribe YouTube Videos**
     
-    You can provide videos in any of these ways:
-    - **videos**: List of YouTube video IDs or URLs (recommended - accepts both)
-    - **video_ids**: List of YouTube video IDs or URLs
-    - **video_urls**: List of YouTube video URLs
+    Downloads audio from YouTube videos and transcribes them using Deepgram API.
+    Stores transcripts in the database and returns the transcription results.
     
-    Examples of valid inputs:
+    **What it does:**
+    1. Accepts one or more YouTube video IDs or URLs
+    2. Downloads audio from each video using yt-dlp
+    3. Extracts video metadata (title, channel, duration, etc.)
+    4. Transcribes audio using Deepgram API
+    5. Stores transcript and metadata in database
+    6. Returns transcription results with full transcript text
+    
+    **Input formats:**
     - Video ID: "dQw4w9WgXcQ"
     - Full URL: "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
     - Short URL: "https://youtu.be/dQw4w9WgXcQ"
     - Embed URL: "https://www.youtube.com/embed/dQw4w9WgXcQ"
     
-    - **deepgram_api_key**: Deepgram API key (can also be set via DEEPGRAM_API_KEY env var)
+    **Features:**
+    - Duplicate detection: Skips already processed videos
+    - Rate limiting: Handles YouTube rate limits gracefully
+    - Metadata extraction: Stores all available video information
+    - Error handling: Returns detailed error messages for failed videos
     
-    The service tracks processed videos in a database to avoid re-downloading and re-transcribing.
+    **Response:**
+    - Returns list of successful transcriptions with full transcript text
+    - Returns list of errors with error messages
+    - Each result includes video_id, video_url, transcript, and status
     """
     # Validate input
     if not request.videos and not request.video_ids and not request.video_urls:
@@ -748,14 +791,35 @@ async def transcribe_videos(request: VideoRequest):
 @app.get("/video/{video_id}")
 async def get_video_status(video_id: str):
     """
-    Get the status and transcript of a video by video_id or URL.
+    **Get Video Information and Transcript**
     
-    You can provide either:
+    Retrieves complete information about a processed video including transcript, metadata, and status.
+    
+    **What it does:**
+    - Looks up video in database by video ID or URL
+    - Returns complete video data including:
+      - Video ID and URL
+      - Status (pending, processing, processed, failed, rate_limited)
+      - Full transcript (if available)
+      - Video metadata (title, channel, duration, view count, upload date)
+      - Error messages (if processing failed)
+      - Creation and update timestamps
+    
+    **Input:**
     - Video ID: `/video/dQw4w9WgXcQ`
     - Video URL: `/video/https://www.youtube.com/watch?v=dQw4w9WgXcQ`
     
-    Returns 404 if the video hasn't been processed yet. Use POST /transcribe to process it first.
+    **Returns:**
+    - 200: Complete video data with all fields
+    - 404: Video not found in database (needs to be transcribed first)
+    
+    **Use cases:**
+    - Check if a video has been processed
+    - Retrieve transcript for a specific video
+    - Get video metadata and statistics
     """
+    import json
+    
     # Decode URL-encoded path parameter
     decoded_id = unquote(video_id)
     
@@ -770,12 +834,28 @@ async def get_video_status(video_id: str):
             detail=f"Video '{extracted_id}' not found in database. Please transcribe it first using POST /transcribe endpoint."
         )
     
+    # Parse metadata if it's a JSON string
+    metadata = db_record.get('metadata')
+    if metadata:
+        try:
+            if isinstance(metadata, str):
+                metadata = json.loads(metadata)
+        except (json.JSONDecodeError, TypeError):
+            metadata = None
+    
     return {
         "video_id": db_record['video_id'],
         "video_url": db_record.get('video_url'),
         "status": db_record['status'],
         "transcript": db_record.get('transcript'),
         "error_message": db_record.get('error_message'),
+        "title": db_record.get('title'),
+        "duration": db_record.get('duration'),
+        "view_count": db_record.get('view_count'),
+        "upload_date": db_record.get('upload_date'),
+        "channel_name": db_record.get('channel_name'),
+        "channel_id": db_record.get('channel_id'),
+        "metadata": metadata,
         "created_at": db_record['created_at'],
         "updated_at": db_record['updated_at']
     }
@@ -970,20 +1050,36 @@ def extract_all_channel_videos(channel_url: str, max_results: Optional[int] = No
 @app.post("/channel/videos", response_model=ChannelResponse)
 async def get_channel_videos(request: ChannelRequest):
     """
-    Get video IDs from a YouTube channel URL using yt-dlp.
+    **Extract Videos from YouTube Channel**
     
-    - Gets ALL videos with pagination (not just recent)
-    - Excludes shorts by default (videos < 60 seconds)
-    - Supports various YouTube channel URL formats
+    Fetches all videos from a YouTube channel and stores their metadata in the database.
     
-    Supports various YouTube channel URL formats:
-    - https://www.youtube.com/@channelname
-    - https://www.youtube.com/channel/CHANNEL_ID
-    - https://www.youtube.com/c/channelname
-    - https://www.youtube.com/user/username
-    - https://www.youtube.com/@channelname/videos
+    **What it does:**
+    1. Accepts a YouTube channel URL
+    2. Extracts all videos from the channel using yt-dlp
+    3. Automatically handles pagination to get ALL videos (not just recent)
+    4. Excludes YouTube Shorts (videos < 60 seconds)
+    5. Extracts video metadata (title, duration, view count, upload date)
+    6. Stores videos in database with "pending" status
+    7. Returns list of all found videos with metadata
     
-    Returns a list of video IDs with their titles, URLs, and metadata.
+    **Supported channel URL formats:**
+    - `https://www.youtube.com/@channelname`
+    - `https://www.youtube.com/channel/CHANNEL_ID`
+    - `https://www.youtube.com/c/channelname`
+    - `https://www.youtube.com/user/username`
+    - `https://www.youtube.com/@channelname/videos`
+    
+    **Features:**
+    - Automatic pagination: Gets all videos, not just first page
+    - Shorts exclusion: Filters out videos shorter than 60 seconds
+    - Metadata extraction: Captures title, duration, views, upload date
+    - Duplicate prevention: Skips videos already in database
+    - Stores videos as "pending" for later transcription
+    
+    **Response:**
+    - Returns channel name and total video count
+    - Returns list of videos with video_id, video_url, title, duration, view_count, upload_date
     """
     try:
         channel_url = normalize_channel_url(request.channel_url)
@@ -1111,20 +1207,21 @@ async def get_channel_videos(request: ChannelRequest):
 @app.get("/channel/videos")
 async def get_channel_videos_get(channel_url: str, max_results: Optional[int] = None):
     """
-    Get video IDs from a YouTube channel URL using yt-dlp (GET endpoint).
+    **Extract Videos from YouTube Channel (GET)**
     
-    Query parameters:
-    - channel_url: YouTube channel URL (required)
-    - max_results: Maximum number of videos to return (optional)
+    Same functionality as POST /channel/videos but using GET method with query parameters.
     
-    Supports various YouTube channel URL formats:
-    - https://www.youtube.com/@channelname
-    - https://www.youtube.com/channel/CHANNEL_ID
-    - https://www.youtube.com/c/channelname
-    - https://www.youtube.com/user/username
-    - https://www.youtube.com/@channelname/videos
+    **What it does:**
+    - Extracts all videos from a YouTube channel
+    - Stores video metadata in database
+    - Excludes shorts and handles pagination
+    - Returns video list with metadata
     
-    The endpoint automatically appends /videos to channel URLs if not present.
+    **Query Parameters:**
+    - `channel_url` (required): YouTube channel URL
+    - `max_results` (optional): Limit number of videos returned
+    
+    **See POST /channel/videos for detailed description.**
     """
     request = ChannelRequest(channel_url=channel_url, max_results=max_results)
     return await get_channel_videos(request)
@@ -1143,7 +1240,24 @@ class LoginResponse(BaseModel):
 
 @app.post("/api/login", response_model=LoginResponse)
 async def login(request: LoginRequest):
-    """Admin login endpoint."""
+    """
+    **Admin Login**
+    
+    Authenticates admin user and returns a session token for API access.
+    
+    **What it does:**
+    - Validates username and password
+    - Creates a session token
+    - Returns token for use in subsequent API requests
+    
+    **Response:**
+    - Returns token and username on success
+    - Returns 401 Unauthorized on invalid credentials
+    
+    **Usage:**
+    - Use returned token in Authorization header: `Bearer <token>`
+    - Token is valid for the session duration
+    """
     if authenticate_user(request.username, request.password):
         token = create_session(request.username)
         return LoginResponse(token=token, username=request.username)
@@ -1156,7 +1270,18 @@ class LogoutRequest(BaseModel):
 
 @app.post("/api/logout")
 async def logout(request: LogoutRequest):
-    """Logout endpoint."""
+    """
+    **Admin Logout**
+    
+    Invalidates a session token, logging out the user.
+    
+    **What it does:**
+    - Deletes the session token from active sessions
+    - Prevents further use of the token
+    
+    **Usage:**
+    - Call this when user logs out to invalidate their session
+    """
     delete_session(request.token)
     return {"message": "Logged out successfully"}
 
@@ -1174,12 +1299,23 @@ async def change_password(
     user: str = Depends(authenticate_api_request)
 ):
     """
-    Change password for the authenticated user.
+    **Change User Password**
     
-    Requires authentication (Basic Auth or Bearer token).
-    Username is determined from the authenticated session.
+    Changes the password for the authenticated user.
     
-    User must provide current password for verification.
+    **What it does:**
+    - Verifies current password
+    - Updates password hash in database
+    - Invalidates all existing sessions (forces re-login)
+    
+    **Security:**
+    - Requires current password verification
+    - Invalidates all active sessions after password change
+    - Requires authentication (Basic Auth or Bearer token)
+    
+    **Response:**
+    - Returns success message
+    - All active sessions are invalidated
     """
     # Use authenticated username (from Basic Auth or Bearer token)
     target_username = user
@@ -1216,35 +1352,85 @@ async def change_password(
 # Admin dashboard endpoints
 @app.get("/api/admin/videos")
 async def get_all_videos_endpoint(user: str = Depends(authenticate_api_request)):
-    """Get all videos with their status. Supports Bearer token or API key authentication."""
+    """
+    **Get All Videos (Admin)**
+    
+    Retrieves all videos from the database with complete information.
+    
+    **What it does:**
+    - Returns all videos regardless of status
+    - Includes complete metadata (title, channel, duration, views, etc.)
+    - Includes transcripts if available
+    - Returns error messages for failed videos
+    - Ordered by most recently updated first
+    
+    **Use cases:**
+    - Dashboard display of all videos
+    - Complete video listing for admin interface
+    - Export all video data
+    
+    **Note:** This endpoint returns ALL videos. Use GET /api/videos for filtered results.
+    """
     return get_all_videos()
 
 
 @app.get("/api/videos")
 async def get_videos_endpoint(
     status: Optional[str] = None,
+    channel: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
     limit: Optional[int] = None,
     offset: Optional[int] = None,
     user: str = Depends(authenticate_api_request)
 ):
     """
-    Get videos with optional filtering.
+    **Get Videos with Advanced Filtering**
     
-    Query parameters:
-    - status: Filter by status (pending, processing, processed, failed)
-    - limit: Maximum number of results (default: all)
-    - offset: Number of results to skip (default: 0)
+    Retrieves videos from the database with comprehensive filtering and pagination options.
     
-    Supports Basic Auth, Bearer token, or API key authentication.
+    **What it does:**
+    - Returns videos matching specified filters
+    - Supports multiple filter combinations
+    - Includes complete metadata for each video
+    - Supports pagination for large result sets
+    
+    **Query Parameters:**
+    - `status`: Filter by processing status
+      - Options: `pending`, `processing`, `processed`, `failed`, `rate_limited`
+      - `processed` includes both `success` and `processed` statuses
+    - `channel`: Filter by exact channel/author name match
+    - `search`: Search across video_id, title, and channel_name (partial match, case-insensitive)
+    - `date_from`: Filter videos updated from this date (format: YYYY-MM-DD)
+    - `date_to`: Filter videos updated until this date (format: YYYY-MM-DD)
+    - `limit`: Maximum number of results to return
+    - `offset`: Number of results to skip (for pagination)
+    
+    **Response:**
+    - Returns total count and list of videos
+    - Each video includes: id, video_id, video_url, status, transcript, title, duration, 
+      view_count, upload_date, channel_name, channel_id, metadata, timestamps
+    
+    **Use cases:**
+    - Filter videos by status for processing queue
+    - Search for specific videos
+    - Get videos from specific channel
+    - Paginate through large video collections
     """
     from database import get_db_connection, DB_TYPE, fetch_all
+    import json
     
-    query = "SELECT video_id, video_url, status, transcript, error_message, created_at, updated_at FROM video_transcriptions"
+    # Select all fields including metadata
+    query = """SELECT id, video_id, video_url, status, transcript, error_message, 
+                      title, duration, view_count, upload_date, channel_name, channel_id, metadata,
+                      created_at, updated_at 
+               FROM video_transcriptions"""
     params = []
     conditions = []
     
     if status:
-        if status in ['pending', 'processing', 'processed', 'failed', 'success']:
+        if status in ['pending', 'processing', 'processed', 'failed', 'success', 'rate_limited']:
             # Support both 'success' and 'processed' for backward compatibility
             if status == 'processed':
                 conditions.append("status IN ('success', 'processed')")
@@ -1256,8 +1442,28 @@ async def get_videos_endpoint(
         else:
             raise HTTPException(
                 status_code=400,
-                detail=f"Invalid status. Must be one of: pending, processing, processed, failed"
+                detail=f"Invalid status. Must be one of: pending, processing, processed, failed, rate_limited"
             )
+    
+    if channel:
+        conditions.append("channel_name = %s" if DB_TYPE == "postgres" else "channel_name = ?")
+        params.append(channel)
+    
+    if search:
+        search_pattern = f"%{search}%"
+        if DB_TYPE == "postgres":
+            conditions.append("(video_id ILIKE %s OR title ILIKE %s OR channel_name ILIKE %s)")
+        else:
+            conditions.append("(video_id LIKE ? OR title LIKE ? OR channel_name LIKE ?)")
+        params.extend([search_pattern, search_pattern, search_pattern])
+    
+    if date_from:
+        conditions.append("updated_at >= %s" if DB_TYPE == "postgres" else "updated_at >= ?")
+        params.append(date_from)
+    
+    if date_to:
+        conditions.append("updated_at <= %s" if DB_TYPE == "postgres" else "updated_at <= ?")
+        params.append(f"{date_to} 23:59:59")
     
     if conditions:
         query += " WHERE " + " AND ".join(conditions)
@@ -1275,6 +1481,15 @@ async def get_videos_endpoint(
     with get_db_connection() as conn:
         videos = fetch_all(conn, query, tuple(params) if params else None)
     
+    # Parse JSON metadata for each video
+    for video in videos:
+        if video.get('metadata'):
+            try:
+                if isinstance(video['metadata'], str):
+                    video['metadata'] = json.loads(video['metadata'])
+            except (json.JSONDecodeError, TypeError):
+                video['metadata'] = None
+    
     return {
         "total": len(videos),
         "videos": videos
@@ -1283,7 +1498,28 @@ async def get_videos_endpoint(
 
 @app.get("/api/admin/stats")
 async def get_stats_endpoint(user: str = Depends(authenticate_api_request)):
-    """Get statistics about videos. Supports Bearer token or API key authentication."""
+    """
+    **Get Video Statistics**
+    
+    Returns aggregated statistics about videos in the database.
+    
+    **What it does:**
+    - Counts videos by status
+    - Provides overview of processing state
+    
+    **Response includes:**
+    - `total`: Total number of videos
+    - `success` / `processed`: Successfully processed videos
+    - `failed`: Videos that failed processing
+    - `processing`: Videos currently being processed
+    - `pending`: Videos waiting to be processed
+    - `rate_limited`: Videos blocked by YouTube rate limits
+    
+    **Use cases:**
+    - Dashboard statistics display
+    - Monitoring processing progress
+    - Health checks and status overview
+    """
     return get_stats()
 
 
@@ -1313,18 +1549,36 @@ async def process_channel_videos(
     user: str = Depends(authenticate_api_request)
 ):
     """
-    Process a YouTube channel: Get video IDs, transcribe all videos, and save to DB.
+    **Process Entire YouTube Channel**
     
-    This endpoint is designed for n8n workflow integration:
-    1. Gets video IDs from channel URL
-    2. Transcribes all videos using existing /transcribe logic
-    3. Saves results to database
+    Complete workflow: Extracts all videos from a channel and transcribes them automatically.
     
-    Supports various YouTube channel URL formats:
-    - https://www.youtube.com/@channelname
-    - https://www.youtube.com/channel/CHANNEL_ID
-    - https://www.youtube.com/c/channelname
-    - https://www.youtube.com/user/username
+    **What it does:**
+    1. Extracts all videos from the channel URL (with pagination)
+    2. Excludes YouTube Shorts (videos < 60 seconds)
+    3. Stores video metadata in database
+    4. Transcribes each video using Deepgram API
+    5. Stores transcripts and results in database
+    6. Handles rate limiting and errors gracefully
+    7. Returns detailed results for each video
+    
+    **Features:**
+    - Automatic pagination to get all videos
+    - Skips already processed videos (duplicate detection)
+    - Retries rate-limited videos on next run
+    - Rate limiting between requests to avoid YouTube blocks
+    - Comprehensive error handling
+    
+    **Response:**
+    - Returns channel information
+    - Returns total videos found
+    - Returns count of successful and failed transcriptions
+    - Returns detailed results for each video (status, transcript, error)
+    
+    **Use cases:**
+    - n8n workflow integration
+    - Batch processing entire channels
+    - Automated transcription pipeline
     """
     try:
         # Step 1: Get video IDs from channel (with pagination, excluding shorts)
@@ -1558,13 +1812,52 @@ async def process_channel_videos(
 # Admin dashboard GUI
 @app.get("/", response_class=HTMLResponse)
 async def admin_dashboard():
-    """Admin dashboard page."""
+    """
+    **Admin Dashboard (Web UI)**
+    
+    Serves the admin dashboard HTML page.
+    
+    **What it does:**
+    - Returns the admin dashboard interface
+    - Provides web UI for all operations
+    - No authentication required (handled by frontend)
+    
+    **Features:**
+    - Video management and viewing
+    - Transcript viewing
+    - Channel processing
+    - AI content generation
+    - Prompt management
+    - User management
+    - Settings configuration
+    
+    **Access:**
+    - Navigate to root URL (/) in browser
+    - Login required to access features
+    """
     return FileResponse("static/admin.html")
 
 
 @app.get("/health")
 async def health():
-    """Health check endpoint."""
+    """
+    **Health Check**
+    
+    Simple health check endpoint to verify API is running.
+    
+    **What it does:**
+    - Returns API status
+    - No authentication required
+    - Used for monitoring and load balancers
+    
+    **Response:**
+    - Returns {"status": "healthy"} if API is running
+    
+    **Use cases:**
+    - Health monitoring
+    - Load balancer checks
+    - Service availability verification
+    """
     return {"status": "healthy"}
 
 
@@ -1588,7 +1881,24 @@ class UserInfo(BaseModel):
 
 @app.get("/api/admin/users", response_model=List[UserInfo])
 async def list_users(user: str = Depends(authenticate_api_request)):
-    """List all admin users. Requires authentication."""
+    """
+    **List All Admin Users**
+    
+    Retrieves a list of all admin users in the system.
+    
+    **What it does:**
+    - Returns all registered admin users
+    - Includes username and creation date
+    - Ordered by creation date
+    
+    **Response:**
+    - Returns list of users with: username, created_at
+    
+    **Use cases:**
+    - Display user list in admin dashboard
+    - User management interface
+    - Audit user accounts
+    """
     from database import get_db_connection, DB_TYPE
     
     try:
@@ -1615,7 +1925,31 @@ async def list_users(user: str = Depends(authenticate_api_request)):
 
 @app.post("/api/admin/users", response_model=UserInfo)
 async def create_user(request: CreateUserRequest, user: str = Depends(authenticate_api_request)):
-    """Create a new admin user. Requires authentication."""
+    """
+    **Create Admin User**
+    
+    Creates a new admin user account with username and password.
+    
+    **What it does:**
+    - Creates new user account
+    - Hashes password securely (SHA256)
+    - Stores user in database
+    - Updates existing user if username already exists (password update)
+    
+    **Required Fields:**
+    - `username`: Minimum 3 characters
+    - `password`: Minimum 6 characters
+    
+    **Response:**
+    - Returns created user info with username
+    - Returns 400 if username already exists (unless updating password)
+    - Returns 500 on creation failure
+    
+    **Use cases:**
+    - Add new admin users
+    - Create team accounts
+    - Reset user passwords
+    """
     from auth import hash_password
     from database import get_db_connection, DB_TYPE
     
@@ -1661,7 +1995,32 @@ async def create_user(request: CreateUserRequest, user: str = Depends(authentica
 
 @app.delete("/api/admin/users/{username}")
 async def delete_user(username: str, user: str = Depends(authenticate_api_request)):
-    """Delete an admin user. Requires authentication. Cannot delete yourself."""
+    """
+    **Delete Admin User**
+    
+    Permanently deletes an admin user account from the system.
+    
+    **What it does:**
+    - Removes user from database
+    - Prevents self-deletion (security measure)
+    - Permanent action (cannot be undone)
+    
+    **Security:**
+    - Cannot delete your own account
+    - Requires authentication
+    - Returns 400 if attempting self-deletion
+    
+    **Response:**
+    - Returns 200 with success message if deleted
+    - Returns 404 if user not found
+    - Returns 400 if attempting to delete yourself
+    - Returns 500 on deletion failure
+    
+    **Use cases:**
+    - Remove user accounts
+    - Clean up inactive users
+    - User management
+    """
     from database import get_db_connection, DB_TYPE
     
     # Prevent deleting yourself
@@ -1706,7 +2065,30 @@ class SettingRequest(BaseModel):
 
 @app.get("/api/admin/settings/{setting_key}")
 async def get_setting_endpoint(setting_key: str, user: str = Depends(authenticate_api_request)):
-    """Get a setting value. Requires authentication."""
+    """
+    **Get Setting Value**
+    
+    Retrieves the value of a specific setting from the database.
+    
+    **What it does:**
+    - Looks up setting by key
+    - Returns setting value (if exists)
+    - Returns null if setting not found
+    
+    **Common Setting Keys:**
+    - `n8n_webhook_url`: n8n webhook URL for channel processing
+    - `youtube_cookies`: YouTube cookies for bot detection bypass
+    - `use_webhook`: Enable/disable webhook integration
+    
+    **Response:**
+    - Returns setting_key and value
+    - Value is null if setting doesn't exist
+    
+    **Use cases:**
+    - Retrieve configuration values
+    - Check if settings are configured
+    - Settings management
+    """
     value = get_setting(setting_key)
     return {"setting_key": setting_key, "value": value}
 
@@ -1717,7 +2099,30 @@ async def set_setting_endpoint(
     request: SettingRequest,
     user: str = Depends(authenticate_api_request)
 ):
-    """Set a setting value. Requires authentication."""
+    """
+    **Set Setting Value**
+    
+    Creates or updates a setting value in the database.
+    
+    **What it does:**
+    - Stores key-value pair in settings table
+    - Updates existing setting if key already exists
+    - Updates timestamp automatically
+    
+    **Common Settings:**
+    - `n8n_webhook_url`: Set n8n webhook URL
+    - `youtube_cookies`: Store YouTube cookies
+    - `use_webhook`: Enable/disable webhook (value: "true" or "false")
+    
+    **Response:**
+    - Returns success message and updated value
+    - Returns 500 if update fails
+    
+    **Use cases:**
+    - Configure n8n webhook
+    - Store YouTube cookies
+    - Update system settings
+    """
     if set_setting(setting_key, request.value):
         return {"message": f"Setting '{setting_key}' updated successfully", "value": request.value}
     else:
@@ -1734,7 +2139,24 @@ class CookieRequest(BaseModel):
 
 @app.get("/api/admin/cookies")
 async def get_cookies_endpoint(user: str = Depends(authenticate_api_request)):
-    """Get stored YouTube cookies. Requires authentication."""
+    """
+    **Get YouTube Cookies**
+    
+    Retrieves stored YouTube cookies used for bypassing bot detection.
+    
+    **What it does:**
+    - Returns stored cookie string from database
+    - Indicates if cookies are configured
+    
+    **Response:**
+    - Returns cookies string and has_cookies boolean
+    - Cookies are null/empty if not configured
+    
+    **Use cases:**
+    - Check if cookies are configured
+    - Display cookie status in UI
+    - Verify cookie configuration
+    """
     cookies = get_setting("youtube_cookies")
     return {
         "cookies": cookies,
@@ -1790,7 +2212,25 @@ async def set_cookies_endpoint(
 
 @app.delete("/api/admin/cookies")
 async def delete_cookies_endpoint(user: str = Depends(authenticate_api_request)):
-    """Delete stored YouTube cookies. Requires authentication."""
+    """
+    **Delete YouTube Cookies**
+    
+    Removes stored YouTube cookies from the database.
+    
+    **What it does:**
+    - Clears cookie setting from database
+    - yt-dlp will no longer use cookies for requests
+    - May result in bot detection if cookies were preventing it
+    
+    **Response:**
+    - Returns success message
+    - Returns 500 if deletion fails
+    
+    **Use cases:**
+    - Clear expired cookies
+    - Reset cookie configuration
+    - Troubleshoot cookie issues
+    """
     if set_setting("youtube_cookies", ""):
         return {"message": "Cookies deleted successfully"}
     else:
@@ -1798,3 +2238,1030 @@ async def delete_cookies_endpoint(user: str = Depends(authenticate_api_request))
             status_code=500,
             detail="Failed to delete cookies"
         )
+
+
+# HTML Video ID Extraction Endpoints
+class HtmlExtractionRequest(BaseModel):
+    """Request model for extracting video IDs from HTML."""
+    html: str = Field(..., description="HTML content from YouTube page")
+
+
+class HtmlExtractionResponse(BaseModel):
+    """Response model for HTML extraction."""
+    video_ids: List[str] = Field(..., description="List of extracted video IDs")
+    count: int = Field(..., description="Total number of unique video IDs found")
+
+
+def extract_youtube_video_ids(html: str) -> List[str]:
+    """
+    Extract YouTube video IDs from HTML content.
+    
+    Matches:
+    - /watch?v=VIDEO_ID
+    - https://www.youtube.com/watch?v=VIDEO_ID
+    - https://i.ytimg.com/vi/VIDEO_ID/hqdefault.jpg
+    """
+    patterns = [
+        r"(?:/watch\?v=)([a-zA-Z0-9_-]{11})",
+        r"(?:https?://(?:www\.)?youtube\.com/watch\?v=)([a-zA-Z0-9_-]{11})",
+        r"(?:https?://i\.ytimg\.com/vi/)([a-zA-Z0-9_-]{11})",
+    ]
+
+    video_ids = set()
+
+    for pattern in patterns:
+        matches = re.findall(pattern, html)
+        video_ids.update(matches)
+
+    return sorted(list(video_ids))
+
+
+@app.post("/api/extract-video-ids", response_model=HtmlExtractionResponse)
+async def extract_video_ids_endpoint(
+    request: HtmlExtractionRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Extract Video IDs from HTML**
+    
+    Parses HTML content from YouTube pages to extract video IDs.
+    
+    **What it does:**
+    - Accepts HTML content from any YouTube page
+    - Uses regex patterns to find video IDs
+    - Returns unique list of extracted video IDs
+    - Handles multiple video ID formats in HTML
+    
+    **Supported Patterns:**
+    - `/watch?v=VIDEO_ID`
+    - `https://www.youtube.com/watch?v=VIDEO_ID`
+    - `https://i.ytimg.com/vi/VIDEO_ID/hqdefault.jpg`
+    
+    **Input:**
+    - `html`: HTML content from YouTube page (paste page source)
+    
+    **Response:**
+    - Returns list of unique video IDs found
+    - Returns count of extracted IDs
+    
+    **Use cases:**
+    - Extract IDs when channel API fails
+    - Parse video IDs from custom pages
+    - Extract IDs from search results
+    - Alternative method for getting video lists
+    """
+    if not request.html or not request.html.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="HTML content cannot be empty"
+        )
+    
+    try:
+        video_ids = extract_youtube_video_ids(request.html)
+        return HtmlExtractionResponse(
+            video_ids=video_ids,
+            count=len(video_ids)
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to extract video IDs: {str(e)}"
+        )
+
+
+# Transcripts API Endpoint
+@app.get("/api/transcripts")
+async def get_transcripts_endpoint(
+    channel: Optional[str] = None,
+    search: Optional[str] = None,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Get Transcripts with Filtering**
+    
+    Retrieves only videos that have been successfully transcribed, with advanced filtering options.
+    
+    **What it does:**
+    - Returns only videos with transcripts (status = processed or success)
+    - Applies filters to narrow down results
+    - Supports search within transcript content
+    - Includes complete video metadata
+    
+    **Query Parameters:**
+    - `channel`: Filter by exact channel/author name match
+    - `search`: Search in video_id, title, channel_name, or transcript content (partial match, case-insensitive)
+    - `date_from`: Filter videos updated from this date (format: YYYY-MM-DD)
+    - `date_to`: Filter videos updated until this date (format: YYYY-MM-DD)
+    - `limit`: Maximum number of results to return
+    - `offset`: Number of results to skip (for pagination)
+    
+    **Response:**
+    - Returns total count and list of transcripts
+    - Each transcript includes: video_id, video_url, title, channel_name, duration, 
+      view_count, upload_date, full transcript text, metadata, timestamps
+    
+    **Use cases:**
+    - Search for specific transcripts
+    - Get transcripts from specific channel
+    - Export processed transcripts
+    - Filter transcripts by date range
+    """
+    from database import get_db_connection, DB_TYPE, fetch_all
+    import json
+    
+    # Select all fields including metadata, only for processed videos
+    query = """SELECT id, video_id, video_url, status, transcript, error_message, 
+                      title, duration, view_count, upload_date, channel_name, channel_id, metadata,
+                      created_at, updated_at 
+               FROM video_transcriptions
+               WHERE status IN ('success', 'processed') AND transcript IS NOT NULL AND transcript != ''"""
+    params = []
+    conditions = []
+    
+    if channel:
+        conditions.append("channel_name = %s" if DB_TYPE == "postgres" else "channel_name = ?")
+        params.append(channel)
+    
+    if search:
+        search_pattern = f"%{search}%"
+        if DB_TYPE == "postgres":
+            conditions.append("(video_id ILIKE %s OR title ILIKE %s OR channel_name ILIKE %s OR transcript ILIKE %s)")
+        else:
+            conditions.append("(video_id LIKE ? OR title LIKE ? OR channel_name LIKE ? OR transcript LIKE ?)")
+        params.extend([search_pattern, search_pattern, search_pattern, search_pattern])
+    
+    if date_from:
+        conditions.append("updated_at >= %s" if DB_TYPE == "postgres" else "updated_at >= ?")
+        params.append(date_from)
+    
+    if date_to:
+        conditions.append("updated_at <= %s" if DB_TYPE == "postgres" else "updated_at <= ?")
+        params.append(f"{date_to} 23:59:59")
+    
+    if conditions:
+        query += " AND " + " AND ".join(conditions)
+    
+    query += " ORDER BY updated_at DESC"
+    
+    if limit:
+        query += " LIMIT %s" if DB_TYPE == "postgres" else " LIMIT ?"
+        params.append(limit)
+        
+        if offset:
+            query += " OFFSET %s" if DB_TYPE == "postgres" else " OFFSET ?"
+            params.append(offset)
+    
+    with get_db_connection() as conn:
+        transcripts = fetch_all(conn, query, tuple(params) if params else None)
+    
+    # Parse JSON metadata for each transcript
+    for transcript in transcripts:
+        if transcript.get('metadata'):
+            try:
+                if isinstance(transcript['metadata'], str):
+                    transcript['metadata'] = json.loads(transcript['metadata'])
+            except (json.JSONDecodeError, TypeError):
+                transcript['metadata'] = None
+    
+    return {
+        "total": len(transcripts),
+        "transcripts": transcripts
+    }
+
+
+# OpenAI GPT API Integration
+class OpenAIRequest(BaseModel):
+    """Request model for OpenAI GPT processing."""
+    prompt: Optional[str] = Field(
+        None,
+        description="The prompt to send to OpenAI GPT model (optional if prompt_id is provided)"
+    )
+    prompt_id: Optional[int] = Field(
+        None,
+        description="ID of saved prompt to use (optional if prompt is provided)"
+    )
+    prompt_variables: Optional[dict] = Field(
+        None,
+        description="Variables to replace in prompt template (e.g., {'video_title': 'Title', 'transcript': '...'})"
+    )
+    model: Optional[str] = Field(
+        "gpt-3.5-turbo",
+        description="OpenAI model to use (default: gpt-3.5-turbo). Options: gpt-3.5-turbo, gpt-4, gpt-4-turbo, gpt-4o-mini"
+    )
+    temperature: Optional[float] = Field(
+        0.7,
+        description="Temperature for response generation (0.0 to 2.0, default: 0.7)",
+        ge=0.0,
+        le=2.0
+    )
+    max_tokens: Optional[int] = Field(
+        1000,
+        description="Maximum number of tokens in response (default: 1000)",
+        ge=1,
+        le=4000
+    )
+    openai_api_key: Optional[str] = Field(
+        None,
+        description="OpenAI API key (optional if set via OPENAI_API_KEY environment variable)"
+    )
+
+
+class OpenAIResponse(BaseModel):
+    """Response model for OpenAI GPT processing."""
+    prompt: str
+    model: str
+    response: str
+    usage: Optional[dict] = None
+    error: Optional[str] = None
+
+
+@app.post("/api/ai/process", response_model=OpenAIResponse)
+async def process_with_openai(
+    request: OpenAIRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Process Prompt with OpenAI GPT**
+    
+    Generates AI content using OpenAI's GPT models (GPT-3.5, GPT-4, etc.).
+    
+    **What it does:**
+    1. Accepts a prompt (either direct text or saved prompt ID)
+    2. Processes prompt using OpenAI API
+    3. Returns generated text response
+    4. Includes token usage statistics
+    
+    **Input Options:**
+    - **Direct Prompt**: Provide `prompt` field with your text
+    - **Saved Prompt**: Provide `prompt_id` to use a saved prompt template
+      - Combines system_prompt and user_prompt_template
+      - Supports variable replacement with `prompt_variables`
+    
+    **Prompt Variables:**
+    - Use `{variable_name}` in prompt templates
+    - Provide values in `prompt_variables` dict
+    - Example: `{'video_title': 'My Video', 'transcript': '...'}`
+    
+    **Model Options:**
+    - `gpt-3.5-turbo`: Fast and cost-effective (default)
+    - `gpt-4o-mini`: Balanced performance
+    - `gpt-4`: Most capable
+    - `gpt-4-turbo`: Latest features
+    
+    **Parameters:**
+    - `temperature`: 0.0 (deterministic) to 2.0 (very creative), default: 0.7
+    - `max_tokens`: Maximum response length (1-4000), default: 1000
+    - `openai_api_key`: Optional (uses OPENAI_API_KEY env var if not provided)
+    
+    **Response:**
+    - Returns generated text
+    - Returns usage statistics (prompt_tokens, completion_tokens, total_tokens)
+    - Returns error message if processing fails
+    
+    **Use cases:**
+    - Summarize transcripts
+    - Extract keywords
+    - Generate content from video data
+    - Analyze video content
+    """
+    # Get OpenAI API key
+    api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="OpenAI API key is required. Provide it in the request or set OPENAI_API_KEY environment variable."
+        )
+    
+    # Get prompt text
+    final_prompt = None
+    if request.prompt_id:
+        # Load saved prompt
+        saved_prompt = get_prompt(request.prompt_id)
+        if not saved_prompt:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Prompt with ID {request.prompt_id} not found"
+            )
+        
+        # Combine system prompt and user prompt template
+        system_prompt = saved_prompt.get('system_prompt') or ''
+        user_prompt = saved_prompt.get('user_prompt_template') or ''
+        
+        # Replace variables in user prompt template
+        if request.prompt_variables and user_prompt:
+            for key, value in request.prompt_variables.items():
+                user_prompt = user_prompt.replace(f"{{{key}}}", str(value))
+        
+        # Combine prompts
+        if system_prompt and user_prompt:
+            final_prompt = f"{system_prompt}\n\n{user_prompt}"
+        elif system_prompt:
+            final_prompt = system_prompt
+        elif user_prompt:
+            final_prompt = user_prompt
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Saved prompt has no system_prompt or user_prompt_template"
+            )
+    elif request.prompt:
+        final_prompt = request.prompt
+        # Replace variables if provided
+        if request.prompt_variables:
+            for key, value in request.prompt_variables.items():
+                final_prompt = final_prompt.replace(f"{{{key}}}", str(value))
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either 'prompt' or 'prompt_id' must be provided"
+        )
+    
+    try:
+        # Initialize OpenAI client
+        client = OpenAI(api_key=api_key)
+        
+        # Prepare messages
+        messages = []
+        # If we have a system prompt (from saved prompt), add it
+        if request.prompt_id:
+            saved_prompt = get_prompt(request.prompt_id)
+            system_prompt = saved_prompt.get('system_prompt') or ''
+            if system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+                # User prompt is the user_prompt_template
+                user_prompt = saved_prompt.get('user_prompt_template') or ''
+                if user_prompt:
+                    # Replace variables
+                    if request.prompt_variables:
+                        for key, value in request.prompt_variables.items():
+                            user_prompt = user_prompt.replace(f"{{{key}}}", str(value))
+                    messages.append({"role": "user", "content": user_prompt})
+                else:
+                    messages.append({"role": "user", "content": final_prompt})
+            else:
+                messages.append({"role": "user", "content": final_prompt})
+        else:
+            messages.append({"role": "user", "content": final_prompt})
+        
+        # Call OpenAI API
+        response = client.chat.completions.create(
+            model=request.model,
+            messages=messages,
+            temperature=request.temperature,
+            max_tokens=request.max_tokens
+        )
+        
+        # Extract response
+        generated_text = response.choices[0].message.content
+        
+        # Extract usage information
+        usage_info = None
+        if response.usage:
+            usage_info = {
+                "prompt_tokens": response.usage.prompt_tokens,
+                "completion_tokens": response.usage.completion_tokens,
+                "total_tokens": response.usage.total_tokens
+            }
+        
+        return OpenAIResponse(
+            prompt=final_prompt,
+            model=request.model,
+            response=generated_text,
+            usage=usage_info
+        )
+    
+    except Exception as e:
+        error_msg = str(e)
+        # Return error in response instead of raising exception
+        return OpenAIResponse(
+            prompt=final_prompt or "",
+            model=request.model,
+            response="",
+            error=error_msg
+        )
+
+
+# Prompt Management Endpoints
+class PromptRequest(BaseModel):
+    """Request model for creating/updating a prompt."""
+    name: str = Field(..., description="Prompt name")
+    description: Optional[str] = Field(None, description="Prompt description")
+    system_prompt: Optional[str] = Field(None, description="System prompt (instructions for AI)")
+    user_prompt_template: Optional[str] = Field(None, description="User prompt template (can contain {variables})")
+    operation_type: Optional[str] = Field(None, description="Operation type (e.g., 'summarize', 'extract_keywords', 'generate_content')")
+
+
+class PromptResponse(BaseModel):
+    """Response model for prompt."""
+    id: int
+    name: str
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    user_prompt_template: Optional[str] = None
+    operation_type: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@app.get("/api/prompts", response_model=List[PromptResponse])
+async def list_prompts(
+    operation_type: Optional[str] = None,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **List All Prompts**
+    
+    Retrieves all saved prompts from the database, optionally filtered by operation type.
+    
+    **What it does:**
+    - Returns all saved prompts with their configurations
+    - Can filter by operation_type (e.g., 'summarize', 'extract_keywords')
+    - Includes system prompts, user templates, and metadata
+    
+    **Query Parameters:**
+    - `operation_type` (optional): Filter prompts by operation type
+    
+    **Response:**
+    - Returns list of prompts with: id, name, description, system_prompt, 
+      user_prompt_template, operation_type, timestamps
+    
+    **Use cases:**
+    - Display prompts in UI dropdown
+    - Manage prompt library
+    - Filter prompts by category
+    """
+    prompts = get_all_prompts(operation_type)
+    return prompts
+
+
+@app.get("/api/prompts/{prompt_id}", response_model=PromptResponse)
+async def get_prompt_endpoint(
+    prompt_id: int,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Get Prompt by ID**
+    
+    Retrieves a specific saved prompt with all its details.
+    
+    **What it does:**
+    - Looks up prompt by ID
+    - Returns complete prompt configuration
+    - Includes system prompt, user template, and metadata
+    
+    **Response:**
+    - Returns 200 with prompt data if found
+    - Returns 404 if prompt not found
+    
+    **Use cases:**
+    - Load prompt for editing
+    - Preview prompt before using
+    - Get prompt details for API calls
+    """
+    prompt = get_prompt(prompt_id)
+    if not prompt:
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    return prompt
+
+
+@app.post("/api/prompts", response_model=PromptResponse)
+async def create_prompt_endpoint(
+    request: PromptRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Create New Prompt**
+    
+    Creates a new prompt template for reuse in AI processing.
+    
+    **What it does:**
+    - Stores prompt configuration in database
+    - Combines system_prompt (AI instructions) and user_prompt_template (user input)
+    - Supports variable placeholders in templates (e.g., {video_title}, {transcript})
+    - Categorizes by operation_type for organization
+    
+    **Required Fields:**
+    - `name`: Prompt name (for identification)
+    
+    **Optional Fields:**
+    - `description`: Brief description of what the prompt does
+    - `system_prompt`: Instructions for AI (sent as "system" message)
+    - `user_prompt_template`: User prompt template with {variables}
+    - `operation_type`: Category (e.g., 'summarize', 'extract_keywords')
+    
+    **Response:**
+    - Returns created prompt with assigned ID
+    - Includes all prompt fields and timestamps
+    
+    **Use cases:**
+    - Save frequently used prompts
+    - Create prompt templates for different operations
+    - Build prompt library for team use
+    """
+    prompt_id = create_prompt(
+        name=request.name,
+        description=request.description,
+        system_prompt=request.system_prompt,
+        user_prompt_template=request.user_prompt_template,
+        operation_type=request.operation_type
+    )
+    prompt = get_prompt(prompt_id)
+    return prompt
+
+
+@app.put("/api/prompts/{prompt_id}", response_model=PromptResponse)
+async def update_prompt_endpoint(
+    prompt_id: int,
+    request: PromptRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Update Existing Prompt**
+    
+    Updates an existing prompt's configuration.
+    
+    **What it does:**
+    - Updates prompt fields (name, description, system_prompt, user_prompt_template, operation_type)
+    - Updates timestamp to reflect modification
+    - Returns updated prompt data
+    
+    **Response:**
+    - Returns 200 with updated prompt if found
+    - Returns 404 if prompt not found
+    
+    **Use cases:**
+    - Edit prompt templates
+    - Refine prompts based on results
+    - Update prompt categories
+    """
+    if not get_prompt(prompt_id):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    
+    update_prompt(
+        prompt_id=prompt_id,
+        name=request.name,
+        description=request.description,
+        system_prompt=request.system_prompt,
+        user_prompt_template=request.user_prompt_template,
+        operation_type=request.operation_type
+    )
+    prompt = get_prompt(prompt_id)
+    return prompt
+
+
+@app.delete("/api/prompts/{prompt_id}")
+async def delete_prompt_endpoint(
+    prompt_id: int,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Delete Prompt**
+    
+    Permanently deletes a prompt from the database.
+    
+    **What it does:**
+    - Removes prompt from database
+    - Note: Does not delete generated content that used this prompt
+    
+    **Response:**
+    - Returns 200 with success message if deleted
+    - Returns 404 if prompt not found
+    - Returns 500 if deletion fails
+    
+    **Use cases:**
+    - Remove unused prompts
+    - Clean up prompt library
+    - Delete test prompts
+    """
+    if not get_prompt(prompt_id):
+        raise HTTPException(status_code=404, detail="Prompt not found")
+    
+    if delete_prompt(prompt_id):
+        return {"message": "Prompt deleted successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete prompt")
+
+
+# Bulk Operations Endpoints
+class BulkVideoRequest(BaseModel):
+    """Request model for bulk video operations."""
+    video_ids: List[str] = Field(..., description="List of video IDs to process")
+    action: str = Field(..., description="Action to perform: 'transcribe', 'get_data', 'generate_content'")
+
+
+class BulkTranscribeRequest(BaseModel):
+    """Request model for bulk transcription."""
+    video_ids: List[str] = Field(..., description="List of video IDs to transcribe")
+    deepgram_api_key: Optional[str] = Field(None, description="Deepgram API key (optional if set via env var)")
+
+
+class BulkGenerateContentRequest(BaseModel):
+    """Request model for bulk content generation."""
+    video_ids: List[str] = Field(..., description="List of video IDs to generate content for")
+    prompt_id: Optional[int] = Field(None, description="ID of saved prompt to use")
+    prompt: Optional[str] = Field(None, description="Custom prompt (optional if prompt_id provided)")
+    prompt_variables: Optional[dict] = Field(None, description="Variables for prompt template")
+    model: Optional[str] = Field("gpt-3.5-turbo", description="OpenAI model to use")
+    temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0)
+    max_tokens: Optional[int] = Field(1000, ge=1, le=4000)
+    openai_api_key: Optional[str] = Field(None, description="OpenAI API key")
+
+
+@app.post("/api/bulk/transcribe")
+async def bulk_transcribe(
+    request: BulkTranscribeRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Bulk Transcribe Videos**
+    
+    Transcribes multiple videos in a single request.
+    
+    **What it does:**
+    - Accepts list of video IDs
+    - Transcribes each video using Deepgram API
+    - Returns results for all videos
+    - Stores transcripts in database
+    
+    **Input:**
+    - `video_ids`: List of YouTube video IDs to transcribe
+    - `deepgram_api_key`: Optional (uses DEEPGRAM_API_KEY env var if not provided)
+    
+    **Response:**
+    - Returns total count and results array
+    - Each result includes: video_id, success status, transcript (if successful), error (if failed)
+    
+    **Use cases:**
+    - Process multiple videos at once
+    - Batch transcription jobs
+    - Retry failed transcriptions
+    """
+    api_key = request.deepgram_api_key or os.getenv("DEEPGRAM_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Deepgram API key is required")
+    
+    results = []
+    for video_id in request.video_ids:
+        try:
+            # Use existing transcribe logic
+            video_request = VideoRequest(videos=[video_id], deepgram_api_key=api_key)
+            result = await transcribe_videos(video_request)
+            results.append({
+                "video_id": video_id,
+                "success": len(result.success) > 0,
+                "transcript": result.success[0].transcript if result.success else None,
+                "error": result.errors[0].error if result.errors else None
+            })
+        except Exception as e:
+            results.append({
+                "video_id": video_id,
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {
+        "total": len(request.video_ids),
+        "results": results
+    }
+
+
+@app.post("/api/bulk/generate-content")
+async def bulk_generate_content(
+    request: BulkGenerateContentRequest,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Bulk Generate AI Content for Videos**
+    
+    Generates AI content for multiple videos using OpenAI GPT models.
+    
+    **What it does:**
+    1. Accepts list of video IDs
+    2. For each video:
+       - Retrieves video data (title, channel, transcript, etc.)
+       - Prepares prompt with video data as variables
+       - Calls OpenAI API to generate content
+       - Stores generated content in database (1 video → many content items)
+    3. Returns results for all videos
+    
+    **Input:**
+    - `video_ids`: List of YouTube video IDs
+    - `prompt_id`: Optional - ID of saved prompt to use
+    - `prompt`: Optional - Custom prompt text (if not using saved prompt)
+    - `prompt_variables`: Optional - Additional variables for prompt template
+    - `model`: OpenAI model (default: gpt-3.5-turbo)
+    - `temperature`: 0.0-2.0 (default: 0.7)
+    - `max_tokens`: 1-4000 (default: 1000)
+    - `openai_api_key`: Optional (uses OPENAI_API_KEY env var)
+    
+    **Automatic Variables:**
+    The following variables are automatically injected from video data:
+    - `{video_id}`, `{video_title}`, `{channel_name}`, `{transcript}`, `{duration}`, `{view_count}`
+    
+    **Response:**
+    - Returns total count and results array
+    - Each result includes: video_id, success status, content (generated text), content_id (database ID), error, usage stats
+    - Generated content is stored in database with foreign key to video
+    
+    **Use cases:**
+    - Generate summaries for multiple videos
+    - Extract keywords from multiple transcripts
+    - Batch content generation
+    - Process entire video collections
+    """
+    results = []
+    
+    for video_id in request.video_ids:
+        try:
+            # Get video data
+            video_record = get_video_record(video_id)
+            if not video_record:
+                results.append({
+                    "video_id": video_id,
+                    "success": False,
+                    "error": "Video not found"
+                })
+                continue
+            
+            # Prepare prompt variables
+            prompt_vars = request.prompt_variables or {}
+            prompt_vars.update({
+                "video_id": video_id,
+                "video_title": video_record.get('title', ''),
+                "channel_name": video_record.get('channel_name', ''),
+                "transcript": video_record.get('transcript', ''),
+                "duration": video_record.get('duration', ''),
+                "view_count": video_record.get('view_count', '')
+            })
+            
+            # Create AI request
+            ai_request = OpenAIRequest(
+                prompt_id=request.prompt_id,
+                prompt=request.prompt,
+                prompt_variables=prompt_vars,
+                model=request.model,
+                temperature=request.temperature,
+                max_tokens=request.max_tokens,
+                openai_api_key=request.openai_api_key
+            )
+            
+            # Process with AI
+            ai_response = await process_with_openai(ai_request, user)
+            
+            # Store generated content in database if successful
+            content_id = None
+            if not ai_response.error and ai_response.response:
+                try:
+                    # Get prompt text for storage
+                    prompt_text = None
+                    if request.prompt_id:
+                        saved_prompt = get_prompt(request.prompt_id)
+                        if saved_prompt:
+                            prompt_text = saved_prompt.get('user_prompt_template') or saved_prompt.get('system_prompt')
+                    elif request.prompt:
+                        prompt_text = request.prompt
+                    
+                    content_id = create_generated_content(
+                        video_id=video_id,
+                        generated_text=ai_response.response,
+                        prompt_id=request.prompt_id,
+                        prompt_text=prompt_text,
+                        model=request.model,
+                        temperature=request.temperature,
+                        max_tokens=request.max_tokens,
+                        usage_info=ai_response.usage
+                    )
+                except Exception as e:
+                    print(f"Warning: Failed to store generated content for video {video_id}: {e}")
+            
+            results.append({
+                "video_id": video_id,
+                "success": not bool(ai_response.error),
+                "content": ai_response.response,
+                "content_id": content_id,
+                "error": ai_response.error,
+                "usage": ai_response.usage
+            })
+        except Exception as e:
+            results.append({
+                "video_id": video_id,
+                "success": False,
+                "error": str(e)
+            })
+    
+    return {
+        "total": len(request.video_ids),
+        "results": results
+    }
+
+
+@app.post("/api/bulk/get-data")
+async def bulk_get_data(
+    video_ids: List[str],
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Bulk Get Video Data**
+    
+    Retrieves complete data for multiple videos in a single request.
+    
+    **What it does:**
+    - Accepts list of video IDs
+    - Retrieves all stored data for each video
+    - Returns comprehensive metadata and transcripts
+    
+    **Input:**
+    - `video_ids`: List of YouTube video IDs (in request body as JSON array)
+    
+    **Response:**
+    - Returns total count and results array
+    - Each result includes: video_id, title, channel_name, duration, view_count, 
+      upload_date, status, transcript, metadata (full JSON)
+    - Returns error message if video not found
+    
+    **Use cases:**
+    - Export data for multiple videos
+    - Batch data retrieval
+    - Data analysis and reporting
+    - API integrations requiring bulk data
+    """
+    results = []
+    for video_id in video_ids:
+        video_record = get_video_record(video_id)
+        if video_record:
+            import json
+            metadata = video_record.get('metadata')
+            if metadata and isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except:
+                    metadata = None
+            
+            results.append({
+                "video_id": video_id,
+                "title": video_record.get('title'),
+                "channel_name": video_record.get('channel_name'),
+                "duration": video_record.get('duration'),
+                "view_count": video_record.get('view_count'),
+                "upload_date": video_record.get('upload_date'),
+                "status": video_record.get('status'),
+                "transcript": video_record.get('transcript'),
+                "metadata": metadata
+            })
+        else:
+            results.append({
+                "video_id": video_id,
+                "error": "Video not found"
+            })
+    
+    return {
+        "total": len(video_ids),
+        "results": results
+    }
+
+
+# Generated Content Endpoints
+class GeneratedContentResponse(BaseModel):
+    """Response model for generated content."""
+    id: int
+    video_id: str
+    prompt_id: Optional[int] = None
+    prompt_text: Optional[str] = None
+    model: Optional[str] = None
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    generated_text: str
+    usage_info: Optional[dict] = None
+    created_at: Optional[str] = None
+
+
+@app.get("/api/videos/{video_id}/generated-content", response_model=List[GeneratedContentResponse])
+async def get_video_generated_content(
+    video_id: str,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Get All Generated Content for a Video**
+    
+    Retrieves all AI-generated content items for a specific video (1 video → many content items).
+    
+    **What it does:**
+    - Looks up all generated content records for the video
+    - Returns list of all content items ordered by creation date (newest first)
+    - Includes complete content text and metadata
+    
+    **Response:**
+    - Returns list of generated content items
+    - Each item includes: id, video_id, prompt_id, prompt_text, model, temperature, 
+      max_tokens, generated_text (full text), usage_info, created_at
+    - Returns empty list if no content found
+    
+    **Use cases:**
+    - View all AI-generated content for a video
+    - Compare different generations
+    - Export content history
+    - Manage content items
+    """
+    contents = get_generated_content_by_video(video_id)
+    return contents
+
+
+@app.get("/api/generated-content/{content_id}", response_model=GeneratedContentResponse)
+async def get_generated_content_endpoint(
+    content_id: int,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Get Generated Content by ID**
+    
+    Retrieves a specific generated content item by its database ID.
+    
+    **What it does:**
+    - Looks up generated content by ID
+    - Returns complete content data including full generated text
+    
+    **Response:**
+    - Returns 200 with content data if found
+    - Returns 404 if content not found
+    
+    **Use cases:**
+    - Retrieve specific content item
+    - View content details
+    - API integrations requiring specific content
+    """
+    content = get_generated_content(content_id)
+    if not content:
+        raise HTTPException(status_code=404, detail="Generated content not found")
+    return content
+
+
+@app.get("/api/generated-content", response_model=List[GeneratedContentResponse])
+async def list_all_generated_content(
+    limit: Optional[int] = None,
+    offset: Optional[int] = None,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **List All Generated Content**
+    
+    Retrieves all generated content items across all videos with pagination support.
+    
+    **What it does:**
+    - Returns all generated content from database
+    - Ordered by creation date (newest first)
+    - Supports pagination for large datasets
+    
+    **Query Parameters:**
+    - `limit`: Maximum number of results to return
+    - `offset`: Number of results to skip (for pagination)
+    
+    **Response:**
+    - Returns list of all generated content items
+    - Each item includes complete data: id, video_id, prompt info, generated text, usage stats
+    
+    **Use cases:**
+    - Browse all generated content
+    - Export all content
+    - Analytics and reporting
+    - Content management
+    """
+    contents = get_all_generated_content(limit=limit, offset=offset)
+    return contents
+
+
+@app.delete("/api/generated-content/{content_id}")
+async def delete_generated_content_endpoint(
+    content_id: int,
+    user: str = Depends(authenticate_api_request)
+):
+    """
+    **Delete Generated Content**
+    
+    Permanently deletes a generated content item from the database.
+    
+    **What it does:**
+    - Removes generated content record by ID
+    - Does not affect the associated video
+    - Permanent deletion (cannot be undone)
+    
+    **Response:**
+    - Returns 200 with success message if deleted
+    - Returns 404 if content not found
+    - Returns 500 if deletion fails
+    
+    **Use cases:**
+    - Remove unwanted content
+    - Clean up test content
+    - Manage content storage
+    """
+    if not get_generated_content(content_id):
+        raise HTTPException(status_code=404, detail="Generated content not found")
+    
+    if delete_generated_content(content_id):
+        return {"message": "Generated content deleted successfully"}
+    else:
+        raise HTTPException(status_code=500, detail="Failed to delete generated content")
