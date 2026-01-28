@@ -1882,16 +1882,8 @@ function handleClearHtml() {
     extractedVideoIds = [];
 }
 
-// Auto-refresh every 30 seconds
-setInterval(() => {
-    if (authToken) {
-        // Only refresh if videos tab is active
-        const videosTab = document.getElementById('videosTab');
-        if (videosTab && videosTab.classList.contains('active')) {
-            loadData();
-        }
-    }
-}, 30000);
+// Note: Auto-refresh of the videos table has been disabled to avoid unexpected reloads
+// If you want manual refresh, use the Refresh button in the UI which calls loadData() explicitly.
 
 async function handleAIProcess() {
     const promptInput = document.getElementById('openaiPrompt');

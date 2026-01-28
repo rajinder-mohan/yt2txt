@@ -553,11 +553,14 @@ async def transcribe_videos(request: VideoRequest):
                 
                 # Skip failed videos (don't re-download)
                 if db_record['status'] == 'failed':
-                    print(f"Skipping failed video {video_id}: Previous attempt failed")
+                    # Log detailed reason from previous failure for better debugging
+                    prev_error = db_record.get('error_message') or 'Previous attempt failed'
+                    prev_status = db_record.get('status')
+                    print(f"Skipping failed video {video_id} (status={prev_status}): {prev_error}")
                     error_results.append(ErrorResponse(
                         video_id=video_id,
                         video_url=db_record.get('video_url') or original_input,
-                        error=db_record.get('error_message', 'Previous attempt failed'),
+                        error=prev_error,
                         status="error"
                     ))
                     continue
@@ -636,7 +639,9 @@ async def transcribe_videos(request: VideoRequest):
             ))
             
         except Exception as e:
+            # Capture full error details for logs
             error_msg = str(e)
+            print(f"\n❌ Error processing video {video_id} ({original_input}): {error_msg}")
             
             # Check if this is a rate limiting error
             # Also check for our special RATE_LIMIT_ERROR prefix
